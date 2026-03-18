@@ -283,30 +283,15 @@ export default function App() {
       }
 
       if (editingVictim) {
-        let internalCode = editingVictim.internalCode;
-        if (data.status === 'active' && !internalCode) {
-          const year = new Date().getFullYear();
-          const count = victims.filter(v => v.internalCode?.startsWith(year.toString())).length + 1;
-          internalCode = `${year}-${count.toString().padStart(2, '0')}`;
-        } else if (data.status === 'refused') {
-          internalCode = '';
-        }
-
         await updateDoc(doc(db, 'victims', editingVictim.id), {
           ...data,
-          internalCode,
           attachmentUrl,
           attachmentName,
           updatedAt: serverTimestamp(),
         });
       } else {
-        const year = new Date().getFullYear();
-        const count = victims.filter(v => v.internalCode?.startsWith(year.toString())).length + 1;
-        const internalCode = data.status === 'refused' ? '' : `${year}-${count.toString().padStart(2, '0')}`;
-        
         await addDoc(collection(db, 'victims'), {
           ...data,
-          internalCode,
           attachmentUrl,
           attachmentName,
           createdAt: serverTimestamp(),
@@ -325,21 +310,8 @@ export default function App() {
 
   const handleUpdateStatus = async (id: string, status: VictimStatus) => {
     try {
-      const victim = victims.find(v => v.id === id);
-      if (!victim) return;
-
-      let internalCode = victim.internalCode;
-      if (status === 'active' && !internalCode) {
-        const year = new Date().getFullYear();
-        const count = victims.filter(v => v.internalCode?.startsWith(year.toString())).length + 1;
-        internalCode = `${year}-${count.toString().padStart(2, '0')}`;
-      } else if (status === 'refused') {
-        internalCode = '';
-      }
-
       await updateDoc(doc(db, 'victims', id), { 
         status, 
-        internalCode,
         updatedAt: serverTimestamp() 
       });
     } catch (error) {
@@ -460,7 +432,7 @@ export default function App() {
             <Plus className="w-5 h-5" /> Novo Cadastro
           </Button>
           <Button 
-            onClick={() => { setView('dashboard'); setView('dashboard'); }} 
+            onClick={() => setView('dashboard')} 
             variant={view === 'dashboard' ? 'primary' : 'outline'}
             className="flex-1 md:flex-none"
           >
@@ -703,6 +675,7 @@ export default function App() {
                   const file = fileInput?.files?.[0];
                   
                   handleSaveVictim({
+                    internalCode: formData.get('internalCode') as string,
                     processNumber: formData.get('processNumber') as string,
                     name: formData.get('name') as string,
                     phone: formData.get('phone') as string,
@@ -713,6 +686,7 @@ export default function App() {
                   }, file);
                 }}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <Input label="Código Interno" name="internalCode" placeholder="2026-01" defaultValue={editingVictim?.internalCode} />
                     <Input label="Nº Processo" name="processNumber" required placeholder="0001456-22.2026" defaultValue={editingVictim?.processNumber} />
                     <Input label="Nome da Vítima" name="name" required placeholder="Ana Souza" defaultValue={editingVictim?.name} />
                     <Input label="Telefone" name="phone" placeholder="(66) 99988-2222" defaultValue={editingVictim?.phone} />
@@ -946,15 +920,15 @@ export default function App() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
                   <div className="bg-purple-50 p-6 rounded-2xl border-2 border-purple-100 text-center">
                     <p className="text-purple-400 text-xs font-black uppercase tracking-widest mb-2">Vítimas Ativas</p>
-                    <p className="text-5xl font-black text-purple-900">{victims.filter(v => v.status === 'active').length}</p>
+                    <p className="text-5xl font-black text-purple-900">{filteredVictimsForReport.filter(v => v.status === 'active').length}</p>
                   </div>
                   <div className="bg-purple-50 p-6 rounded-2xl border-2 border-purple-100 text-center">
                     <p className="text-purple-400 text-xs font-black uppercase tracking-widest mb-2">Vítimas Inativas</p>
-                    <p className="text-5xl font-black text-purple-900">{victims.filter(v => v.status === 'inactive').length}</p>
+                    <p className="text-5xl font-black text-purple-900">{filteredVictimsForReport.filter(v => v.status === 'inactive').length}</p>
                   </div>
                   <div className="bg-purple-50 p-6 rounded-2xl border-2 border-purple-100 text-center">
                     <p className="text-purple-400 text-xs font-black uppercase tracking-widest mb-2">Recusaram</p>
-                    <p className="text-5xl font-black text-purple-900">{victims.filter(v => v.status === 'refused').length}</p>
+                    <p className="text-5xl font-black text-purple-900">{filteredVictimsForReport.filter(v => v.status === 'refused').length}</p>
                   </div>
                 </div>
 
