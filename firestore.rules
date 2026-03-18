@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return true; // Allow public access as requested
+    }
+
+    function isAdmin() {
+      return true; // Allow everyone to be admin in public mode
+    }
+
+    function isValidVictim(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.processNumber is string && data.processNumber.size() > 0 &&
+             data.status in ['active', 'inactive', 'refused'] &&
+             (!('attachmentUrl' in data) || (data.attachmentUrl is string && data.attachmentUrl.size() < 1100000)) &&
+             (!('attachmentName' in data) || (data.attachmentName is string && data.attachmentName.size() < 200));
+    }
+
+    // Victims collection
+    match /victims/{victimId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidVictim(request.resource.data);
+      allow update: if isAuthenticated() && isValidVictim(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Visits collection
+    match /visits/{visitId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
+    // Users collection (for roles)
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+  }
+}

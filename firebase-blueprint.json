@@ -1,0 +1,48 @@
+{
+  "entities": {
+    "Victim": {
+      "title": "Victim",
+      "description": "Information about a victim of domestic violence.",
+      "type": "object",
+      "properties": {
+        "internalCode": { "type": "string", "description": "Internal tracking code (e.g., 2026-01)" },
+        "processNumber": { "type": "string", "description": "Legal process number" },
+        "name": { "type": "string", "description": "Victim's full name" },
+        "phone": { "type": "string", "description": "Victim's phone number" },
+        "aggressorName": { "type": "string", "description": "Aggressor's full name" },
+        "protectiveMeasureDate": { "type": "string", "description": "Date of the protective measure" },
+        "observations": { "type": "string", "description": "General observations" },
+        "status": { "type": "string", "enum": ["active", "inactive", "refused"], "description": "Current status of the case" },
+        "attachmentUrl": { "type": "string", "description": "URL of the attached file (PDF, image, Word)" },
+        "attachmentName": { "type": "string", "description": "Name of the attached file" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["processNumber", "name", "status"]
+    },
+    "Visit": {
+      "title": "Visit",
+      "description": "Information about a visit to a victim or aggressor.",
+      "type": "object",
+      "properties": {
+        "victimId": { "type": "string", "description": "Reference to the victim document" },
+        "date": { "type": "string", "format": "date-time", "description": "Date of the visit" },
+        "type": { "type": "string", "enum": ["victim", "aggressor"], "description": "Who was visited" },
+        "situation": { "type": "string", "enum": ["first_visit", "follow_up", "emergency", "violation"], "description": "Situation of the visit" },
+        "observation": { "type": "string", "description": "Visit observations" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["victimId", "date", "type", "situation"]
+    }
+  },
+  "firestore": {
+    "/victims": {
+      "schema": "Victim",
+      "description": "Collection of victims"
+    },
+    "/visits": {
+      "schema": "Visit",
+      "description": "Collection of visits"
+    }
+  }
+}
