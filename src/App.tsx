@@ -283,8 +283,18 @@ export default function App() {
       }
 
       if (editingVictim) {
+        let internalCode = editingVictim.internalCode;
+        if (data.status === 'active' && !internalCode) {
+          const year = new Date().getFullYear();
+          const count = victims.filter(v => v.internalCode?.startsWith(year.toString())).length + 1;
+          internalCode = `${year}-${count.toString().padStart(2, '0')}`;
+        } else if (data.status === 'refused') {
+          internalCode = '';
+        }
+
         await updateDoc(doc(db, 'victims', editingVictim.id), {
           ...data,
+          internalCode,
           attachmentUrl,
           attachmentName,
           updatedAt: serverTimestamp(),
@@ -699,7 +709,7 @@ export default function App() {
                     aggressorName: formData.get('aggressorName') as string,
                     protectiveMeasureDate: formData.get('protectiveMeasureDate') as string,
                     observations: formData.get('observations') as string,
-                    status: formData.get('status') as VictimStatus,
+                    status: newVictimStatus,
                   }, file);
                 }}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -936,15 +946,15 @@ export default function App() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
                   <div className="bg-purple-50 p-6 rounded-2xl border-2 border-purple-100 text-center">
                     <p className="text-purple-400 text-xs font-black uppercase tracking-widest mb-2">Vítimas Ativas</p>
-                    <p className="text-5xl font-black text-purple-900">{filteredVictimsForReport.filter(v => v.status === 'active').length}</p>
+                    <p className="text-5xl font-black text-purple-900">{victims.filter(v => v.status === 'active').length}</p>
                   </div>
                   <div className="bg-purple-50 p-6 rounded-2xl border-2 border-purple-100 text-center">
                     <p className="text-purple-400 text-xs font-black uppercase tracking-widest mb-2">Vítimas Inativas</p>
-                    <p className="text-5xl font-black text-purple-900">{filteredVictimsForReport.filter(v => v.status === 'inactive').length}</p>
+                    <p className="text-5xl font-black text-purple-900">{victims.filter(v => v.status === 'inactive').length}</p>
                   </div>
                   <div className="bg-purple-50 p-6 rounded-2xl border-2 border-purple-100 text-center">
                     <p className="text-purple-400 text-xs font-black uppercase tracking-widest mb-2">Recusaram</p>
-                    <p className="text-5xl font-black text-purple-900">{filteredVictimsForReport.filter(v => v.status === 'refused').length}</p>
+                    <p className="text-5xl font-black text-purple-900">{victims.filter(v => v.status === 'refused').length}</p>
                   </div>
                 </div>
 
