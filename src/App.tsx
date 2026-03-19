@@ -363,7 +363,7 @@ export default function App() {
     }
 
     doc.setFontSize(18);
-    doc.text('REDE SEGURA – Patrulha Maria da Penha', 14, 22);
+    doc.text('CENTRAL DE ACOMPANHAMENTO – Patrulha Maria da Penha', 14, 22);
     doc.setFontSize(12);
     doc.text('Querência/MT - Relatório de Acompanhamento', 14, 30);
     doc.text(`Período: ${periodLabel}`, 14, 38);
@@ -387,7 +387,7 @@ export default function App() {
       headStyles: { fillColor: [155, 89, 182] }
     });
 
-    doc.save(`relatorio-rede-segura-${periodLabel.replace(/\s/g, '-')}.pdf`);
+    doc.save(`relatorio-central-acompanhamento-${periodLabel.replace(/\s/g, '-')}.pdf`);
   };
 
   if (loading) {
@@ -408,7 +408,7 @@ export default function App() {
               <ShieldAlert className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-xl font-bold tracking-tight">REDE SEGURA</h1>
+              <h1 className="text-xl font-bold tracking-tight">CENTRAL DE ACOMPANHAMENTO</h1>
               <p className="text-xs text-purple-100">Patrulha Maria da Penha – Querência/MT</p>
             </div>
           </div>
