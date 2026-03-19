@@ -1,27 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc,
-  doc, 
-  serverTimestamp, 
-  orderBy,
-  getDoc,
-  getDocs
-} from 'firebase/firestore';
-import { 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  onAuthStateChanged, 
-  signOut,
-  User
-} from 'firebase/auth';
-import { db, auth } from './firebase';
-import { getDocFromServer, doc as firestoreDoc } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo } from 'react'; // Test Edit
 import { Victim, VictimStatus, Visit, VisitType, VisitSituation } from './types';
 import { 
   Plus, 
@@ -170,9 +147,7 @@ const Select = ({
 // --- Main App ---
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isTestMode, setIsTestMode] = useState(false);
   const [view, setView] = useState<'dashboard' | 'new' | 'case' | 'reports'>('dashboard');
   const [activeTab, setActiveTab] = useState<VictimStatus>('active');
   const [victims, setVictims] = useState<Victim[]>([]);
@@ -186,78 +161,45 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   const [victimToDelete, setVictimToDelete] = useState<string | null>(null);
 
-  const isAdmin = !!user || isTestMode;
-
-  // Test connection
-  useEffect(() => {
-    async function testConnection() {
-      try {
-        await getDocFromServer(firestoreDoc(db, 'test', 'connection'));
-      } catch (error) {
-        if(error instanceof Error && error.message.includes('the client is offline')) {
-          console.error("Please check your Firebase configuration. ");
-        }
-      }
-    }
-    if (db) testConnection();
-  }, []);
+  const isAdmin = true;
 
   // Report filters
   const [reportType, setReportType] = useState<'monthly' | 'yearly'>('monthly');
   const [reportMonth, setReportMonth] = useState(new Date().getMonth());
   const [reportYear, setReportYear] = useState(new Date().getFullYear());
 
-  // Auth
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setLoading(false);
-    });
-    
-    // Safety timeout for loading state
-    const timeout = setTimeout(() => {
-      setLoading(false);
-    }, 5000);
-
-    return () => {
-      unsubscribe();
-      clearTimeout(timeout);
-    };
-  }, []);
-
-  const handleLogin = async () => {
-    const provider = new GoogleAuthProvider();
+  const fetchData = async () => {
     try {
-      await signInWithPopup(auth, provider);
+      const [victimsRes, visitsRes] = await Promise.all([
+        fetch('/api/victims', { cache: 'no-store' }),
+        fetch('/api/visits', { cache: 'no-store' })
+      ]);
+      
+      if (victimsRes.ok) {
+        const victimsData = await victimsRes.json();
+        setVictims(victimsData);
+      }
+      
+      if (visitsRes.ok) {
+        const visitsData = await visitsRes.json();
+        setVisits(visitsData);
+      }
     } catch (error) {
-      console.error("Login error", error);
+      console.error("Error fetching data", error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleLogout = () => signOut(auth);
-
-  // Data Fetching
+  // Data Fetching & Polling
   useEffect(() => {
-    const victimsQuery = query(collection(db, 'victims'), orderBy('createdAt', 'desc'));
-    const unsubscribeVictims = onSnapshot(victimsQuery, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Victim));
-      setVictims(data);
-    }, (error) => {
-      console.error("Error fetching victims", error);
-    });
+    fetchData();
+    
+    const interval = setInterval(() => {
+      fetchData();
+    }, 5000);
 
-    const visitsQuery = query(collection(db, 'visits'), orderBy('date', 'desc'));
-    const unsubscribeVisits = onSnapshot(visitsQuery, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit));
-      setVisits(data);
-    }, (error) => {
-      console.error("Error fetching visits", error);
-    });
-
-    return () => {
-      unsubscribeVictims();
-      unsubscribeVisits();
-    };
+    return () => clearInterval(interval);
   }, []);
 
   // Derived Data
@@ -329,18 +271,21 @@ export default function App() {
         ...data,
         attachmentUrl,
         attachmentName,
-        updatedAt: serverTimestamp(),
       };
 
-      if (editingVictim) {
-        await updateDoc(doc(db, 'victims', editingVictim.id), victimData);
-      } else {
-        await addDoc(collection(db, 'victims'), {
-          ...victimData,
-          createdAt: serverTimestamp(),
-        });
-      }
+      const url = editingVictim ? `/api/victims/${editingVictim.id}` : '/api/victims';
+      const method = editingVictim ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(victimData),
+        cache: 'no-store'
+      });
+
+      if (!response.ok) throw new Error("Erro ao salvar vítima");
       
+      await fetchData();
       setEditingVictim(null);
       setView('dashboard');
     } catch (error: any) {
@@ -354,10 +299,15 @@ export default function App() {
 
   const handleUpdateStatus = async (id: string, status: VictimStatus) => {
     try {
-      await updateDoc(doc(db, 'victims', id), { 
-        status, 
-        updatedAt: serverTimestamp() 
+      const response = await fetch(`/api/victims/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+        cache: 'no-store'
       });
+      if (response.ok) {
+        await fetchData();
+      }
     } catch (error) {
       console.error("Error updating status", error);
     }
@@ -367,18 +317,19 @@ export default function App() {
     const victimId = selectedVictimId || editingVictim?.id;
     if (!victimId) return;
     try {
-      if (editingVisit) {
-        await updateDoc(doc(db, 'visits', editingVisit.id), {
-          ...data,
-          updatedAt: serverTimestamp(),
-        });
-      } else {
-        await addDoc(collection(db, 'visits'), {
-          ...data,
-          victimId,
-          createdAt: serverTimestamp(),
-        });
-      }
+      const url = editingVisit ? `/api/visits/${editingVisit.id}` : '/api/visits';
+      const method = editingVisit ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...data, victimId }),
+        cache: 'no-store'
+      });
+
+      if (!response.ok) throw new Error("Erro ao salvar visita");
+
+      await fetchData();
       setShowVisitModal(false);
       setEditingVisit(null);
     } catch (error) {
@@ -389,7 +340,13 @@ export default function App() {
   const handleDeleteVisit = async (visitId: string) => {
     if (!window.confirm("Tem certeza que deseja excluir esta visita?")) return;
     try {
-      await deleteDoc(doc(db, 'visits', visitId));
+      const response = await fetch(`/api/visits/${visitId}`, {
+        method: 'DELETE',
+        cache: 'no-store'
+      });
+      if (response.ok) {
+        await fetchData();
+      }
     } catch (error) {
       console.error("Error deleting visit", error);
     }
@@ -398,14 +355,14 @@ export default function App() {
   const handleDeleteVictim = async (id: string) => {
     if (!window.confirm("Tem certeza que deseja excluir este cadastro?")) return;
     try {
-      // Also delete associated visits
-      const victimVisitsQuery = query(collection(db, 'visits'), where('victimId', '==', id));
-      const victimVisitsSnapshot = await getDocs(victimVisitsQuery);
-      const deletePromises = victimVisitsSnapshot.docs.map(doc => deleteDoc(doc.ref));
-      await Promise.all(deletePromises);
-
-      await deleteDoc(doc(db, 'victims', id));
-      setVictimToDelete(null);
+      const response = await fetch(`/api/victims/${id}`, {
+        method: 'DELETE',
+        cache: 'no-store'
+      });
+      if (response.ok) {
+        await fetchData();
+        setVictimToDelete(null);
+      }
     } catch (error) {
       console.error("Error deleting victim", error);
       alert("Erro ao excluir cadastro.");
@@ -461,14 +418,6 @@ export default function App() {
     );
   }
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-purple-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-600"></div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-white text-purple-900 font-sans">
       {/* Header */}
@@ -481,64 +430,14 @@ export default function App() {
             <div>
               <h1 className="text-xl font-bold tracking-tight">CENTRAL DE ACOMPANHAMENTO</h1>
               <p className="text-xs text-purple-100">Patrulha Maria da Penha – Querência/MT</p>
-              {isTestMode && <p className="text-[10px] text-red-300 font-bold animate-pulse uppercase">⚠️ MODO DE TESTE ATIVO - ACESSO PÚBLICO</p>}
             </div>
-          </div>
-          <div className="flex items-center gap-4">
-            {user ? (
-              <div className="flex items-center gap-3">
-                <div className="hidden md:block text-right">
-                  <p className="text-sm font-bold">{user.displayName || 'Usuário'}</p>
-                  <p className="text-xs text-purple-200">{user.email}</p>
-                </div>
-                <Button variant="ghost" onClick={handleLogout} className="text-white hover:bg-white/10">
-                  <LogOut className="w-5 h-5" />
-                </Button>
-              </div>
-            ) : isTestMode ? (
-              <div className="flex items-center gap-3">
-                <div className="hidden md:block text-right">
-                  <p className="text-sm font-bold">Modo de Teste</p>
-                  <p className="text-xs text-purple-200">Acesso Temporário</p>
-                </div>
-                <Button variant="ghost" onClick={() => setIsTestMode(false)} className="text-white hover:bg-white/10">
-                  <LogOut className="w-5 h-5" />
-                </Button>
-              </div>
-            ) : (
-              <Button variant="secondary" onClick={handleLogin}>
-                <UserIcon className="w-5 h-5" /> Entrar
-              </Button>
-            )}
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto p-4 md:p-6">
-        {(!user && !isTestMode) ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="bg-purple-100 p-6 rounded-full mb-6">
-              <ShieldAlert className="w-16 h-16 text-purple-600" />
-            </div>
-            <h2 className="text-3xl font-bold text-purple-900 mb-4">Acesso Restrito</h2>
-            <p className="text-purple-600 max-w-md mb-8">
-              Para garantir a segurança dos dados, é necessário autenticar-se antes de acessar o sistema.
-            </p>
-            <div className="flex flex-col gap-4">
-              <Button onClick={handleLogin} className="px-8 py-4 text-lg">
-                <UserIcon className="w-6 h-6" /> Entrar com Google
-              </Button>
-              <div className="mt-4 pt-4 border-t border-purple-100">
-                <p className="text-xs text-purple-400 mb-2">Problemas com o login? Use o modo de teste:</p>
-                <Button variant="outline" onClick={() => setIsTestMode(true)} className="w-full">
-                  Entrar em Modo de Teste
-                </Button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* Navigation Actions */}
+        <>
+          {/* Navigation Actions */}
         <div className="flex flex-wrap gap-3 mb-8">
           <Button 
             onClick={() => { setEditingVictim(null); setNewVictimStatus('active'); setView('new'); }} 
@@ -1159,8 +1058,7 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
-          </>
-        )}
+        </>
       </main>
 
       {/* Visit Modal */}
