@@ -534,11 +534,12 @@ export default function App() {
                                 {victim.attachmentUrl ? (
                                   <a 
                                     href={victim.attachmentUrl} 
+                                    download={victim.attachmentName || 'arquivo'}
                                     target="_blank" 
                                     rel="noreferrer"
                                     className="flex items-center gap-1 text-xs font-bold text-purple-600 hover:text-purple-800"
                                   >
-                                    <FileText className="w-4 h-4" /> Ver Arquivo
+                                    <FileText className="w-4 h-4" /> Baixar Arquivo
                                   </a>
                                 ) : (
                                   <span className="text-xs text-purple-300 italic">Sem anexo</span>
@@ -784,11 +785,12 @@ export default function App() {
                       <div className="mt-4">
                         <a 
                           href={selectedVictim.attachmentUrl} 
+                          download={selectedVictim.attachmentName || 'arquivo'}
                           target="_blank" 
                           rel="noreferrer"
                           className="flex items-center justify-center gap-2 w-full py-3 bg-purple-50 text-purple-600 rounded-xl font-bold text-sm hover:bg-purple-100 transition-colors"
                         >
-                          <FileText className="w-5 h-5" /> Ver Documento Anexo
+                          <FileText className="w-5 h-5" /> Baixar Documento Anexo
                         </a>
                       </div>
                     )}
