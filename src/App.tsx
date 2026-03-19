@@ -51,57 +51,6 @@ import { ptBR } from 'date-fns/locale';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
-
 // --- Helper Functions ---
 const formatDate = (date: string | Date | undefined | null, pattern: string = 'dd/MM/yyyy') => {
   if (!date) return '---';
@@ -116,48 +65,6 @@ const formatDate = (date: string | Date | undefined | null, pattern: string = 'd
 };
 
 // --- Components ---
-
-const Modal = ({ 
-  show, 
-  onClose, 
-  title, 
-  children, 
-  footer 
-}: { 
-  show: boolean; 
-  onClose: () => void; 
-  title: string; 
-  children: React.ReactNode;
-  footer?: React.ReactNode;
-}) => (
-  <AnimatePresence>
-    {show && (
-      <div className="fixed inset-0 bg-purple-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.9, y: 20 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.9, y: 20 }}
-          className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border-t-8 border-purple-600"
-        >
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-2xl font-bold text-purple-900">{title}</h3>
-            <button onClick={onClose} className="text-purple-400 hover:text-purple-600 transition-colors">
-              <UserX className="w-6 h-6" />
-            </button>
-          </div>
-          <div className="mb-8 text-purple-600 leading-relaxed">
-            {children}
-          </div>
-          {footer && (
-            <div className="flex gap-4">
-              {footer}
-            </div>
-          )}
-        </motion.div>
-      </div>
-    )}
-  </AnimatePresence>
-);
 
 const Button = ({ 
   children, 
@@ -263,26 +170,6 @@ const Select = ({
 // --- Main App ---
 
 export default function App() {
-  const [confirmModal, setConfirmModal] = useState<{
-    show: boolean;
-    title: string;
-    message: string;
-    onConfirm: () => void;
-  }>({ show: false, title: '', message: '', onConfirm: () => {} });
-
-  const [alertModal, setAlertModal] = useState<{
-    show: boolean;
-    title: string;
-    message: string;
-  }>({ show: false, title: '', message: '' });
-
-  const showAlert = (title: string, message: string) => {
-    setAlertModal({ show: true, title, message });
-  };
-
-  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
-    setConfirmModal({ show: true, title, message, onConfirm });
-  };
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'dashboard' | 'new' | 'case' | 'reports'>('dashboard');
@@ -346,7 +233,7 @@ export default function App() {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Victim));
       setVictims(data);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'victims');
+      console.error("Error fetching victims", error);
     });
 
     const visitsQuery = query(collection(db, 'visits'), orderBy('date', 'desc'));
@@ -354,7 +241,7 @@ export default function App() {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit));
       setVisits(data);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'visits');
+      console.error("Error fetching visits", error);
     });
 
     return () => {
@@ -413,7 +300,7 @@ export default function App() {
       if (file) {
         // Check file size (max 1MB for Firestore document limit)
         if (file.size > 800 * 1024) {
-          showAlert("Arquivo muito grande", "O arquivo é muito grande. O limite é de 800KB para anexos.");
+          alert("O arquivo é muito grande. O limite é de 800KB para anexos.");
           setUploading(false);
           return;
         }
@@ -436,27 +323,19 @@ export default function App() {
       };
 
       if (editingVictim) {
-        try {
-          await updateDoc(doc(db, 'victims', editingVictim.id), victimData);
-        } catch (error) {
-          handleFirestoreError(error, OperationType.UPDATE, `victims/${editingVictim.id}`);
-        }
+        await updateDoc(doc(db, 'victims', editingVictim.id), victimData);
       } else {
-        try {
-          await addDoc(collection(db, 'victims'), {
-            ...victimData,
-            createdAt: serverTimestamp(),
-          });
-        } catch (error) {
-          handleFirestoreError(error, OperationType.CREATE, 'victims');
-        }
+        await addDoc(collection(db, 'victims'), {
+          ...victimData,
+          createdAt: serverTimestamp(),
+        });
       }
       
       setEditingVictim(null);
       setView('dashboard');
     } catch (error) {
       console.error("Error saving victim", error);
-      showAlert("Erro ao salvar", "Ocorreu um erro ao salvar o cadastro. Verifique o tamanho do arquivo ou sua conexão.");
+      alert("Erro ao salvar cadastro. Verifique o tamanho do arquivo.");
     } finally {
       setUploading(false);
     }
@@ -469,7 +348,7 @@ export default function App() {
         updatedAt: serverTimestamp() 
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `victims/${id}`);
+      console.error("Error updating status", error);
     }
   };
 
@@ -492,25 +371,21 @@ export default function App() {
       setShowVisitModal(false);
       setEditingVisit(null);
     } catch (error) {
-      handleFirestoreError(error, editingVisit ? OperationType.UPDATE : OperationType.CREATE, editingVisit ? `visits/${editingVisit.id}` : 'visits');
+      console.error("Error adding visit", error);
     }
   };
 
   const handleDeleteVisit = async (visitId: string) => {
-    showConfirm(
-      "Excluir Visita",
-      "Tem certeza que deseja excluir esta visita? Esta ação não pode ser desfeita.",
-      async () => {
-        try {
-          await deleteDoc(doc(db, 'visits', visitId));
-        } catch (error) {
-          handleFirestoreError(error, OperationType.DELETE, `visits/${visitId}`);
-        }
-      }
-    );
+    if (!window.confirm("Tem certeza que deseja excluir esta visita?")) return;
+    try {
+      await deleteDoc(doc(db, 'visits', visitId));
+    } catch (error) {
+      console.error("Error deleting visit", error);
+    }
   };
 
   const handleDeleteVictim = async (id: string) => {
+    if (!window.confirm("Tem certeza que deseja excluir este cadastro?")) return;
     try {
       // Also delete associated visits
       const victimVisitsQuery = query(collection(db, 'visits'), where('victimId', '==', id));
@@ -521,7 +396,8 @@ export default function App() {
       await deleteDoc(doc(db, 'victims', id));
       setVictimToDelete(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `victims/${id}`);
+      console.error("Error deleting victim", error);
+      alert("Erro ao excluir cadastro.");
     }
   };
 
@@ -1295,29 +1171,6 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
-
-      <Modal 
-        show={alertModal.show} 
-        onClose={() => setAlertModal({ ...alertModal, show: false })}
-        title={alertModal.title}
-        footer={<Button onClick={() => setAlertModal({ ...alertModal, show: false })} className="w-full">OK</Button>}
-      >
-        {alertModal.message}
-      </Modal>
-
-      <Modal 
-        show={confirmModal.show} 
-        onClose={() => setConfirmModal({ ...confirmModal, show: false })}
-        title={confirmModal.title}
-        footer={
-          <>
-            <Button onClick={() => { confirmModal.onConfirm(); setConfirmModal({ ...confirmModal, show: false }); }} className="flex-1">Confirmar</Button>
-            <Button variant="outline" onClick={() => setConfirmModal({ ...confirmModal, show: false })} className="flex-1">Cancelar</Button>
-          </>
-        }
-      >
-        {confirmModal.message}
-      </Modal>
 
       {/* Footer */}
       <footer className="mt-20 py-10 border-t border-purple-100 text-center text-purple-300 text-sm">
