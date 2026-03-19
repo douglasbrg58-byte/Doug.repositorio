@@ -172,6 +172,7 @@ const Select = ({
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isTestMode, setIsTestMode] = useState(false);
   const [view, setView] = useState<'dashboard' | 'new' | 'case' | 'reports'>('dashboard');
   const [activeTab, setActiveTab] = useState<VictimStatus>('active');
   const [victims, setVictims] = useState<Victim[]>([]);
@@ -185,7 +186,7 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   const [victimToDelete, setVictimToDelete] = useState<string | null>(null);
 
-  const isAdmin = !!user;
+  const isAdmin = !!user || isTestMode;
 
   // Test connection
   useEffect(() => {
@@ -212,7 +213,16 @@ export default function App() {
       setUser(u);
       setLoading(false);
     });
-    return unsubscribe;
+    
+    // Safety timeout for loading state
+    const timeout = setTimeout(() => {
+      setLoading(false);
+    }, 5000);
+
+    return () => {
+      unsubscribe();
+      clearTimeout(timeout);
+    };
   }, []);
 
   const handleLogin = async () => {
@@ -471,6 +481,7 @@ export default function App() {
             <div>
               <h1 className="text-xl font-bold tracking-tight">CENTRAL DE ACOMPANHAMENTO</h1>
               <p className="text-xs text-purple-100">Patrulha Maria da Penha – Querência/MT</p>
+              {isTestMode && <p className="text-[10px] text-red-300 font-bold animate-pulse uppercase">⚠️ MODO DE TESTE ATIVO - ACESSO PÚBLICO</p>}
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -484,6 +495,16 @@ export default function App() {
                   <LogOut className="w-5 h-5" />
                 </Button>
               </div>
+            ) : isTestMode ? (
+              <div className="flex items-center gap-3">
+                <div className="hidden md:block text-right">
+                  <p className="text-sm font-bold">Modo de Teste</p>
+                  <p className="text-xs text-purple-200">Acesso Temporário</p>
+                </div>
+                <Button variant="ghost" onClick={() => setIsTestMode(false)} className="text-white hover:bg-white/10">
+                  <LogOut className="w-5 h-5" />
+                </Button>
+              </div>
             ) : (
               <Button variant="secondary" onClick={handleLogin}>
                 <UserIcon className="w-5 h-5" /> Entrar
@@ -494,7 +515,7 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto p-4 md:p-6">
-        {!user ? (
+        {(!user && !isTestMode) ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <div className="bg-purple-100 p-6 rounded-full mb-6">
               <ShieldAlert className="w-16 h-16 text-purple-600" />
@@ -503,9 +524,17 @@ export default function App() {
             <p className="text-purple-600 max-w-md mb-8">
               Para garantir a segurança dos dados, é necessário autenticar-se antes de acessar o sistema.
             </p>
-            <Button onClick={handleLogin} className="px-8 py-4 text-lg">
-              <UserIcon className="w-6 h-6" /> Entrar com Google
-            </Button>
+            <div className="flex flex-col gap-4">
+              <Button onClick={handleLogin} className="px-8 py-4 text-lg">
+                <UserIcon className="w-6 h-6" /> Entrar com Google
+              </Button>
+              <div className="mt-4 pt-4 border-t border-purple-100">
+                <p className="text-xs text-purple-400 mb-2">Problemas com o login? Use o modo de teste:</p>
+                <Button variant="outline" onClick={() => setIsTestMode(true)} className="w-full">
+                  Entrar em Modo de Teste
+                </Button>
+              </div>
+            </div>
           </div>
         ) : (
           <>
