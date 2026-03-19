@@ -185,7 +185,7 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   const [victimToDelete, setVictimToDelete] = useState<string | null>(null);
 
-  const isAdmin = true; // No login required, everyone is admin
+  const isAdmin = !!user;
 
   // Test connection
   useEffect(() => {
@@ -333,9 +333,10 @@ export default function App() {
       
       setEditingVictim(null);
       setView('dashboard');
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving victim", error);
-      alert("Erro ao salvar cadastro. Verifique o tamanho do arquivo.");
+      const errorMessage = error?.message || "Erro desconhecido";
+      alert(`Erro ao salvar cadastro: ${errorMessage}. Se houver anexo, verifique se o tamanho é inferior a 800KB.`);
     } finally {
       setUploading(false);
     }
@@ -450,6 +451,14 @@ export default function App() {
     );
   }
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-purple-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-600"></div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-white text-purple-900 font-sans">
       {/* Header */}
@@ -465,16 +474,42 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <div className="hidden md:block text-right">
-              <p className="text-sm font-bold">Acesso Público</p>
-              <p className="text-xs text-purple-200">Patrulha Maria da Penha</p>
-            </div>
+            {user ? (
+              <div className="flex items-center gap-3">
+                <div className="hidden md:block text-right">
+                  <p className="text-sm font-bold">{user.displayName || 'Usuário'}</p>
+                  <p className="text-xs text-purple-200">{user.email}</p>
+                </div>
+                <Button variant="ghost" onClick={handleLogout} className="text-white hover:bg-white/10">
+                  <LogOut className="w-5 h-5" />
+                </Button>
+              </div>
+            ) : (
+              <Button variant="secondary" onClick={handleLogin}>
+                <UserIcon className="w-5 h-5" /> Entrar
+              </Button>
+            )}
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto p-4 md:p-6">
-        {/* Navigation Actions */}
+        {!user ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="bg-purple-100 p-6 rounded-full mb-6">
+              <ShieldAlert className="w-16 h-16 text-purple-600" />
+            </div>
+            <h2 className="text-3xl font-bold text-purple-900 mb-4">Acesso Restrito</h2>
+            <p className="text-purple-600 max-w-md mb-8">
+              Para garantir a segurança dos dados, é necessário autenticar-se antes de acessar o sistema.
+            </p>
+            <Button onClick={handleLogin} className="px-8 py-4 text-lg">
+              <UserIcon className="w-6 h-6" /> Entrar com Google
+            </Button>
+          </div>
+        ) : (
+          <>
+            {/* Navigation Actions */}
         <div className="flex flex-wrap gap-3 mb-8">
           <Button 
             onClick={() => { setEditingVictim(null); setNewVictimStatus('active'); setView('new'); }} 
@@ -1095,6 +1130,8 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
+          </>
+        )}
       </main>
 
       {/* Visit Modal */}
