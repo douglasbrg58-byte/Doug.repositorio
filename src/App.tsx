@@ -243,10 +243,15 @@ export default function App() {
 
     const now = new Date().toISOString();
     
+    const finalData = {
+      ...data,
+      internalCode: data.status === 'refused' ? '' : (data.internalCode || ''),
+    };
+
     if (editingVictim) {
       setVictims(prev => prev.map(v => v.id === editingVictim.id ? { 
         ...v, 
-        ...data, 
+        ...finalData, 
         attachmentUrl, 
         attachmentName,
         updatedAt: now 
@@ -254,7 +259,7 @@ export default function App() {
     } else {
       const newVictim: Victim = {
         id: generateId(),
-        internalCode: data.internalCode || '',
+        internalCode: finalData.internalCode,
         processNumber: data.processNumber || '',
         name: data.name || '',
         phone: data.phone || '',
@@ -275,7 +280,19 @@ export default function App() {
   };
 
   const handleUpdateStatus = (id: string, status: VictimStatus) => {
-    setVictims(prev => prev.map(v => v.id === id ? { ...v, status, updatedAt: new Date().toISOString() } : v));
+    const victim = victims.find(v => v.id === id);
+    if (status === 'active' && (!victim?.internalCode)) {
+      setEditingVictim(victim || null);
+      setNewVictimStatus('active');
+      setView('new');
+      return;
+    }
+    setVictims(prev => prev.map(v => v.id === id ? { 
+      ...v, 
+      status, 
+      internalCode: status === 'refused' ? '' : v.internalCode,
+      updatedAt: new Date().toISOString() 
+    } : v));
   };
 
   const handleAddVisit = (data: Partial<Visit>) => {
@@ -641,7 +658,15 @@ export default function App() {
                   }, file);
                 }}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <Input label="Código Interno" name="internalCode" placeholder="2026-01" defaultValue={editingVictim?.internalCode} />
+                    {newVictimStatus !== 'refused' && (
+                      <Input 
+                        label="Código Interno" 
+                        name="internalCode" 
+                        placeholder="2026-01" 
+                        required={newVictimStatus === 'active'} 
+                        defaultValue={editingVictim?.internalCode} 
+                      />
+                    )}
                     <Input label="Nº Processo" name="processNumber" required placeholder="0001456-22.2026" defaultValue={editingVictim?.processNumber} />
                     <Input label="Nome da Vítima" name="name" required placeholder="Ana Souza" defaultValue={editingVictim?.name} />
                     <Input label="Telefone" name="phone" placeholder="(66) 99988-2222" defaultValue={editingVictim?.phone} />
