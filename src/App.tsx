@@ -1,5 +1,4 @@
-import * as React from 'react';
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   collection, 
   query, 
@@ -80,7 +79,7 @@ interface FirestoreErrorInfo {
   }
 }
 
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null, setError?: (err: string) => void) {
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
@@ -99,13 +98,66 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     operationType,
     path
   }
-  const errStr = JSON.stringify(errInfo);
-  console.error('Firestore Error: ', errStr);
-  if (setError) setError(errStr);
-  throw new Error(errStr);
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
 }
 
+// --- Helper Functions ---
+const formatDate = (date: string | Date | undefined | null, pattern: string = 'dd/MM/yyyy') => {
+  if (!date) return '---';
+  try {
+    if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return format(new Date(date + 'T12:00:00'), pattern);
+    }
+    return format(new Date(date), pattern);
+  } catch (e) {
+    return '---';
+  }
+};
+
 // --- Components ---
+
+const Modal = ({ 
+  show, 
+  onClose, 
+  title, 
+  children, 
+  footer 
+}: { 
+  show: boolean; 
+  onClose: () => void; 
+  title: string; 
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}) => (
+  <AnimatePresence>
+    {show && (
+      <div className="fixed inset-0 bg-purple-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.9, y: 20 }}
+          className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border-t-8 border-purple-600"
+        >
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-2xl font-bold text-purple-900">{title}</h3>
+            <button onClick={onClose} className="text-purple-400 hover:text-purple-600 transition-colors">
+              <UserX className="w-6 h-6" />
+            </button>
+          </div>
+          <div className="mb-8 text-purple-600 leading-relaxed">
+            {children}
+          </div>
+          {footer && (
+            <div className="flex gap-4">
+              {footer}
+            </div>
+          )}
+        </motion.div>
+      </div>
+    )}
+  </AnimatePresence>
+);
 
 const Button = ({ 
   children, 
@@ -211,6 +263,26 @@ const Select = ({
 // --- Main App ---
 
 export default function App() {
+  const [confirmModal, setConfirmModal] = useState<{
+    show: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({ show: false, title: '', message: '', onConfirm: () => {} });
+
+  const [alertModal, setAlertModal] = useState<{
+    show: boolean;
+    title: string;
+    message: string;
+  }>({ show: false, title: '', message: '' });
+
+  const showAlert = (title: string, message: string) => {
+    setAlertModal({ show: true, title, message });
+  };
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setConfirmModal({ show: true, title, message, onConfirm });
+  };
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'dashboard' | 'new' | 'case' | 'reports'>('dashboard');
@@ -220,11 +292,11 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedVictimId, setSelectedVictimId] = useState<string | null>(null);
   const [editingVictim, setEditingVictim] = useState<Victim | null>(null);
+  const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
   const [showVisitModal, setShowVisitModal] = useState(false);
   const [newVictimStatus, setNewVictimStatus] = useState<VictimStatus>('active');
   const [uploading, setUploading] = useState(false);
   const [victimToDelete, setVictimToDelete] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const isAdmin = true; // No login required, everyone is admin
 
@@ -274,7 +346,7 @@ export default function App() {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Victim));
       setVictims(data);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'victims', setError);
+      handleFirestoreError(error, OperationType.LIST, 'victims');
     });
 
     const visitsQuery = query(collection(db, 'visits'), orderBy('date', 'desc'));
@@ -282,7 +354,7 @@ export default function App() {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit));
       setVisits(data);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'visits', setError);
+      handleFirestoreError(error, OperationType.LIST, 'visits');
     });
 
     return () => {
@@ -294,15 +366,11 @@ export default function App() {
   // Derived Data
   const filteredVictims = useMemo(() => {
     return victims.filter(v => {
+      const matchesStatus = v.status === activeTab;
       const matchesSearch = v.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                            v.internalCode?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                            v.processNumber.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      // If searching, ignore tabs to find the victim anywhere
-      if (searchTerm) return matchesSearch;
-      
-      // Otherwise, filter by the active tab
-      return v.status === activeTab && matchesSearch;
+      return matchesStatus && matchesSearch;
     });
   }, [victims, activeTab, searchTerm]);
 
@@ -316,31 +384,22 @@ export default function App() {
 
   const filteredVisitsForReport = useMemo(() => {
     return visits.filter(v => {
-      if (!v.date) return false;
-      const [year, month] = v.date.split('-').map(Number);
+      const d = new Date(v.date + 'T12:00:00');
       if (reportType === 'monthly') {
-        return (month - 1) === reportMonth && year === reportYear;
+        return d.getMonth() === reportMonth && d.getFullYear() === reportYear;
       }
-      return year === reportYear;
+      return d.getFullYear() === reportYear;
     });
   }, [visits, reportType, reportMonth, reportYear]);
 
   const filteredVictimsForReport = useMemo(() => {
     return victims.filter(v => {
-      // Use protectiveMeasureDate if available, otherwise fallback to createdAt
-      let dateToUse = v.protectiveMeasureDate;
-      if (!dateToUse && v.createdAt) {
-        const d = v.createdAt.toDate ? v.createdAt.toDate() : new Date();
-        dateToUse = format(d, 'yyyy-MM-dd');
-      }
-      
-      if (!dateToUse) return false;
-      
-      const [year, month] = dateToUse.split('-').map(Number);
+      if (!v.protectiveMeasureDate) return false;
+      const d = new Date(v.protectiveMeasureDate + 'T12:00:00');
       if (reportType === 'monthly') {
-        return (month - 1) === reportMonth && year === reportYear;
+        return d.getMonth() === reportMonth && d.getFullYear() === reportYear;
       }
-      return year === reportYear;
+      return d.getFullYear() === reportYear;
     });
   }, [victims, reportType, reportMonth, reportYear]);
 
@@ -352,9 +411,9 @@ export default function App() {
       let attachmentName = editingVictim?.attachmentName || '';
 
       if (file) {
-        // Check file size (max 700KB to ensure Base64 doesn't exceed 1MB Firestore limit)
-        if (file.size > 700 * 1024) {
-          alert("O arquivo é muito grande. O limite é de 700KB para anexos.");
+        // Check file size (max 1MB for Firestore document limit)
+        if (file.size > 800 * 1024) {
+          showAlert("Arquivo muito grande", "O arquivo é muito grande. O limite é de 800KB para anexos.");
           setUploading(false);
           return;
         }
@@ -377,24 +436,27 @@ export default function App() {
       };
 
       if (editingVictim) {
-        await updateDoc(doc(db, 'victims', editingVictim.id), victimData);
+        try {
+          await updateDoc(doc(db, 'victims', editingVictim.id), victimData);
+        } catch (error) {
+          handleFirestoreError(error, OperationType.UPDATE, `victims/${editingVictim.id}`);
+        }
       } else {
-        await addDoc(collection(db, 'victims'), {
-          ...victimData,
-          createdAt: serverTimestamp(),
-        });
-      }
-      
-      // Update active tab to the status of the saved victim so it appears immediately
-      if (data.status) {
-        setActiveTab(data.status);
+        try {
+          await addDoc(collection(db, 'victims'), {
+            ...victimData,
+            createdAt: serverTimestamp(),
+          });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.CREATE, 'victims');
+        }
       }
       
       setEditingVictim(null);
       setView('dashboard');
     } catch (error) {
-      handleFirestoreError(error, editingVictim ? OperationType.UPDATE : OperationType.CREATE, 'victims', setError);
-      alert("Erro ao salvar cadastro. Verifique o tamanho do arquivo.");
+      console.error("Error saving victim", error);
+      showAlert("Erro ao salvar", "Ocorreu um erro ao salvar o cadastro. Verifique o tamanho do arquivo ou sua conexão.");
     } finally {
       setUploading(false);
     }
@@ -407,22 +469,45 @@ export default function App() {
         updatedAt: serverTimestamp() 
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'victims', setError);
+      handleFirestoreError(error, OperationType.UPDATE, `victims/${id}`);
     }
   };
 
   const handleAddVisit = async (data: Partial<Visit>) => {
-    if (!selectedVictimId) return;
+    const victimId = selectedVictimId || editingVictim?.id;
+    if (!victimId) return;
     try {
-      await addDoc(collection(db, 'visits'), {
-        ...data,
-        victimId: selectedVictimId,
-        createdAt: serverTimestamp(),
-      });
+      if (editingVisit) {
+        await updateDoc(doc(db, 'visits', editingVisit.id), {
+          ...data,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await addDoc(collection(db, 'visits'), {
+          ...data,
+          victimId,
+          createdAt: serverTimestamp(),
+        });
+      }
       setShowVisitModal(false);
+      setEditingVisit(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'visits', setError);
+      handleFirestoreError(error, editingVisit ? OperationType.UPDATE : OperationType.CREATE, editingVisit ? `visits/${editingVisit.id}` : 'visits');
     }
+  };
+
+  const handleDeleteVisit = async (visitId: string) => {
+    showConfirm(
+      "Excluir Visita",
+      "Tem certeza que deseja excluir esta visita? Esta ação não pode ser desfeita.",
+      async () => {
+        try {
+          await deleteDoc(doc(db, 'visits', visitId));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `visits/${visitId}`);
+        }
+      }
+    );
   };
 
   const handleDeleteVictim = async (id: string) => {
@@ -436,7 +521,7 @@ export default function App() {
       await deleteDoc(doc(db, 'victims', id));
       setVictimToDelete(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'victims', setError);
+      handleFirestoreError(error, OperationType.DELETE, `victims/${id}`);
     }
   };
 
@@ -485,31 +570,6 @@ export default function App() {
     return (
       <div className="min-h-screen bg-purple-50 flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent"></div>
-      </div>
-    );
-  }
-
-  if (error) {
-    let displayError = "Ocorreu um erro inesperado.";
-    try {
-      const parsed = JSON.parse(error || "{}");
-      if (parsed.error) {
-        displayError = `Erro no Firestore: ${parsed.error} (${parsed.operationType} em ${parsed.path})`;
-      }
-    } catch (e) {
-      displayError = error || displayError;
-    }
-
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-purple-50 p-4">
-        <div className="bg-white p-8 rounded-3xl shadow-2xl border-2 border-purple-100 max-w-md w-full text-center">
-          <ShieldAlert className="w-16 h-16 text-red-500 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-purple-900 mb-4">Ops! Algo deu errado</h2>
-          <p className="text-purple-700 mb-6">{displayError}</p>
-          <Button onClick={() => window.location.reload()} className="w-full">
-            Recarregar Página
-          </Button>
-        </div>
       </div>
     );
   }
@@ -641,21 +701,18 @@ export default function App() {
                           return (
                             <tr key={victim.id} className="hover:bg-purple-50/50 transition-colors group">
                               <td className="px-6 py-4 font-mono text-sm font-bold text-purple-600">
-                                {victim.internalCode || '---'}
+                                {victim.internalCode || 'RECUSADO'}
                               </td>
                               <td className="px-6 py-4 text-sm">{victim.processNumber}</td>
                               <td className="px-6 py-4 font-semibold">{victim.name}</td>
                               <td className="px-6 py-4 text-sm">{victim.phone}</td>
                               <td className="px-6 py-4">
                                 <div className="flex gap-1">
-                                  {vVisits.slice(0, 3).map((v, i) => {
-                                    const [year, month, day] = v.date.split('-').map(Number);
-                                    return (
-                                      <span key={i} className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
-                                        {`${day.toString().padStart(2, '0')}/${month.toString().padStart(2, '0')}`}
-                                      </span>
-                                    );
-                                  })}
+                                  {vVisits.slice(0, 3).map((v, i) => (
+                                    <span key={i} className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
+                                      {formatDate(v.date, 'dd/MM')}
+                                    </span>
+                                  ))}
                                   {vVisits.length > 3 && <span className="text-[10px] text-purple-400">+{vVisits.length - 3}</span>}
                                   {vVisits.length === 0 && <span className="text-xs text-purple-300">0</span>}
                                 </div>
@@ -850,6 +907,69 @@ export default function App() {
                     />
                   </div>
 
+                  {editingVictim && (
+                    <div className="pt-6 border-t-2 border-purple-50">
+                      <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-lg font-bold text-purple-900 flex items-center gap-2">
+                          <History className="w-5 h-5 text-purple-600" /> Histórico de Visitas
+                        </h3>
+                        <Button 
+                          type="button" 
+                          variant="secondary" 
+                          onClick={() => { setEditingVisit(null); setShowVisitModal(true); }}
+                          className="text-xs py-1"
+                        >
+                          <Plus className="w-4 h-4" /> Nova Visita
+                        </Button>
+                      </div>
+                      
+                      <div className="space-y-3">
+                        {visits.filter(v => v.victimId === editingVictim.id).length === 0 ? (
+                          <p className="text-sm text-purple-400 italic text-center py-4 bg-purple-50 rounded-xl">
+                            Nenhuma visita registrada.
+                          </p>
+                        ) : (
+                          visits
+                            .filter(v => v.victimId === editingVictim.id)
+                            .sort((a, b) => new Date(b.date + 'T12:00:00').getTime() - new Date(a.date + 'T12:00:00').getTime())
+                            .map(visit => (
+                              <div key={visit.id} className="flex justify-between items-center p-3 bg-purple-50 rounded-xl border border-purple-100">
+                                <div>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="text-xs font-bold bg-purple-200 text-purple-700 px-2 py-0.5 rounded">
+                                      {formatDate(visit.date)}
+                                    </span>
+                                    <span className="text-[10px] uppercase font-black text-purple-400">
+                                      {visit.type === 'victim' ? 'Vítima' : 'Agressor'}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-purple-800 line-clamp-1">{visit.observation}</p>
+                                </div>
+                                <div className="flex gap-1">
+                                  <Button 
+                                    type="button" 
+                                    variant="ghost" 
+                                    onClick={() => { setEditingVisit(visit); setShowVisitModal(true); }}
+                                    className="p-1.5 h-auto"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </Button>
+                                  <Button 
+                                    type="button" 
+                                    variant="ghost" 
+                                    onClick={() => handleDeleteVisit(visit.id)}
+                                    className="p-1.5 h-auto text-red-400 hover:text-red-600"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex gap-4 pt-4">
                     <Button type="submit" className="flex-1 py-4" disabled={uploading}>
                       {uploading ? (
@@ -886,19 +1006,14 @@ export default function App() {
                       <ArrowLeft className="w-6 h-6" />
                     </button>
                     <div className="text-right">
-                      <p className="text-purple-200 text-sm font-mono uppercase tracking-widest">Código: {selectedVictim.internalCode || '---'}</p>
+                      <p className="text-purple-200 text-sm font-mono uppercase tracking-widest">Código: {selectedVictim.internalCode || 'RECUSADO'}</p>
                       <p className="text-white font-bold">Processo: {selectedVictim.processNumber}</p>
                     </div>
                   </div>
                   <h2 className="text-4xl font-black mb-2">{selectedVictim.name}</h2>
                   <div className="flex flex-wrap gap-4 text-purple-100">
                     <span className="flex items-center gap-1"><Phone className="w-4 h-4" /> {selectedVictim.phone}</span>
-                    <span className="flex items-center gap-1"><Calendar className="w-4 h-4" /> Medida: {selectedVictim.protectiveMeasureDate ? (
-                      (() => {
-                        const [y, m, d] = selectedVictim.protectiveMeasureDate.split('-').map(Number);
-                        return `${d.toString().padStart(2, '0')}/${m.toString().padStart(2, '0')}/${y}`;
-                      })()
-                    ) : '---'}</span>
+                    <span className="flex items-center gap-1"><Calendar className="w-4 h-4" /> Medida: {formatDate(selectedVictim.protectiveMeasureDate)}</span>
                   </div>
                 </div>
 
@@ -960,20 +1075,14 @@ export default function App() {
                             <div className="flex justify-between items-start mb-3">
                               <div className="flex items-center gap-3">
                                 <span className="bg-purple-600 text-white px-3 py-1 rounded-full text-xs font-bold">
-                                  {(() => {
-                                    const [y, m, d] = visit.date.split('-').map(Number);
-                                    return `${d.toString().padStart(2, '0')}/${m.toString().padStart(2, '0')}/${y}`;
-                                  })()}
+                                  {formatDate(visit.date)}
                                 </span>
                                 <span className={`text-xs font-black uppercase tracking-widest ${visit.type === 'victim' ? 'text-purple-600' : 'text-red-600'}`}>
                                   {visit.type === 'victim' ? '👤 Vítima' : '⚠️ Agressor'}
                                 </span>
                               </div>
-                              <span className="text-xs font-bold text-purple-500 bg-purple-50 px-2 py-0.5 rounded uppercase tracking-tighter">
-                                {visit.situation === 'first_visit' ? '1ª Visita' :
-                                 visit.situation === 'follow_up' ? 'Acompanhamento' :
-                                 visit.situation === 'emergency' ? 'Urgência' :
-                                 'Descumprimento'}
+                              <span className="text-xs font-medium text-purple-400">
+                                {visit.situation.replace('_', ' ')}
                               </span>
                             </div>
                             <p className="text-purple-800 text-sm">{visit.observation}</p>
@@ -1085,8 +1194,24 @@ export default function App() {
                     <ShieldAlert className="absolute -right-4 -bottom-4 w-32 h-32 text-white/10" />
                     <h3 className="text-xl font-bold mb-4">Resumo do Período</h3>
                     <p className="text-purple-200 text-sm mb-6">Acompanhamento realizado pela Patrulha Maria da Penha em Querência/MT.</p>
-                    <div className="text-4xl font-black">
-                      {filteredVictimsForReport.length} <span className="text-lg font-normal text-purple-300">Casos no Período</span>
+                    <div className="space-y-4">
+                      <div className="text-4xl font-black">
+                        {filteredVictimsForReport.length} <span className="text-lg font-normal text-purple-300">Casos no Período</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 pt-4 border-t border-white/10">
+                        <div className="text-center">
+                          <p className="text-[10px] uppercase font-bold text-purple-300">Ativas</p>
+                          <p className="text-xl font-black">{filteredVictimsForReport.filter(v => v.status === 'active').length}</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-[10px] uppercase font-bold text-purple-300">Inativas</p>
+                          <p className="text-xl font-black">{filteredVictimsForReport.filter(v => v.status === 'inactive').length}</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-[10px] uppercase font-bold text-purple-300">Recusaram</p>
+                          <p className="text-xl font-black">{filteredVictimsForReport.filter(v => v.status === 'refused').length}</p>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1106,9 +1231,14 @@ export default function App() {
               exit={{ opacity: 0, scale: 0.9 }}
               className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border-t-8 border-purple-600"
             >
-              <h3 className="text-2xl font-bold text-purple-900 mb-6 flex items-center gap-2">
-                <Calendar className="w-6 h-6 text-purple-600" /> Nova Visita
-              </h3>
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold text-purple-900 flex items-center gap-2">
+                  <Calendar className="w-6 h-6 text-purple-600" /> {editingVisit ? 'Editar Visita' : 'Nova Visita'}
+                </h3>
+                <button onClick={() => { setShowVisitModal(false); setEditingVisit(null); }} className="text-purple-400 hover:text-purple-600">
+                  <UserX className="w-6 h-6" />
+                </button>
+              </div>
               <form className="space-y-6" onSubmit={(e) => {
                 e.preventDefault();
                 const formData = new FormData(e.currentTarget);
@@ -1119,17 +1249,17 @@ export default function App() {
                   observation: formData.get('observation') as string,
                 });
               }}>
-                <Input label="Data da Visita" name="date" type="date" required defaultValue={format(new Date(), 'yyyy-MM-dd')} />
+                <Input label="Data da Visita" name="date" type="date" required defaultValue={editingVisit?.date || format(new Date(), 'yyyy-MM-dd')} />
                 
                 <div className="flex flex-col gap-2">
                   <label className="text-sm font-semibold text-purple-900">Tipo de Visita</label>
                   <div className="grid grid-cols-2 gap-2">
                     <label className="flex items-center gap-2 p-3 border-2 border-purple-50 rounded-xl cursor-pointer hover:bg-purple-50 transition-colors has-[:checked]:bg-purple-100 has-[:checked]:border-purple-400">
-                      <input type="radio" name="type" value="victim" defaultChecked className="hidden" />
+                      <input type="radio" name="type" value="victim" defaultChecked={!editingVisit || editingVisit.type === 'victim'} className="hidden" />
                       <span className="text-sm font-bold">👤 Vítima</span>
                     </label>
                     <label className="flex items-center gap-2 p-3 border-2 border-purple-50 rounded-xl cursor-pointer hover:bg-purple-50 transition-colors has-[:checked]:bg-red-100 has-[:checked]:border-red-400">
-                      <input type="radio" name="type" value="aggressor" className="hidden" />
+                      <input type="radio" name="type" value="aggressor" defaultChecked={editingVisit?.type === 'aggressor'} className="hidden" />
                       <span className="text-sm font-bold">⚠️ Agressor</span>
                     </label>
                   </div>
@@ -1138,6 +1268,7 @@ export default function App() {
                 <Select 
                   label="Situação" 
                   name="situation" 
+                  defaultValue={editingVisit?.situation || 'follow_up'}
                   options={[
                     { value: 'first_visit', label: '1ª Visita' },
                     { value: 'follow_up', label: 'Acompanhamento' },
@@ -1150,19 +1281,43 @@ export default function App() {
                   <label className="text-sm font-semibold text-purple-900">Observação</label>
                   <textarea 
                     name="observation"
+                    defaultValue={editingVisit?.observation}
                     className="px-3 py-2 border-2 border-purple-100 rounded-lg focus:border-purple-400 focus:outline-none transition-colors bg-white text-purple-900 min-h-[80px]"
                   />
                 </div>
 
                 <div className="flex gap-4 pt-4">
-                  <Button type="submit" className="flex-1 py-4">Salvar</Button>
-                  <Button variant="outline" onClick={() => setShowVisitModal(false)} className="flex-1 py-4">Cancelar</Button>
+                  <Button type="submit" className="flex-1 py-4">{editingVisit ? 'Atualizar' : 'Salvar'}</Button>
+                  <Button variant="outline" onClick={() => { setShowVisitModal(false); setEditingVisit(null); }} className="flex-1 py-4">Cancelar</Button>
                 </div>
               </form>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
+
+      <Modal 
+        show={alertModal.show} 
+        onClose={() => setAlertModal({ ...alertModal, show: false })}
+        title={alertModal.title}
+        footer={<Button onClick={() => setAlertModal({ ...alertModal, show: false })} className="w-full">OK</Button>}
+      >
+        {alertModal.message}
+      </Modal>
+
+      <Modal 
+        show={confirmModal.show} 
+        onClose={() => setConfirmModal({ ...confirmModal, show: false })}
+        title={confirmModal.title}
+        footer={
+          <>
+            <Button onClick={() => { confirmModal.onConfirm(); setConfirmModal({ ...confirmModal, show: false }); }} className="flex-1">Confirmar</Button>
+            <Button variant="outline" onClick={() => setConfirmModal({ ...confirmModal, show: false })} className="flex-1">Cancelar</Button>
+          </>
+        }
+      >
+        {confirmModal.message}
+      </Modal>
 
       {/* Footer */}
       <footer className="mt-20 py-10 border-t border-purple-100 text-center text-purple-300 text-sm">
