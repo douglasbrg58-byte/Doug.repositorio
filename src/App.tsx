@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   collection, 
   query, 
@@ -21,6 +22,7 @@ import {
   User
 } from 'firebase/auth';
 import { db, auth } from './firebase';
+import { getDocFromServer, doc as firestoreDoc } from 'firebase/firestore';
 import { Victim, VictimStatus, Visit, VisitType, VisitSituation } from './types';
 import { 
   Plus, 
@@ -49,6 +51,59 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null, setError?: (err: string) => void) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  const errStr = JSON.stringify(errInfo);
+  console.error('Firestore Error: ', errStr);
+  if (setError) setError(errStr);
+  throw new Error(errStr);
+}
 
 // --- Components ---
 
@@ -169,8 +224,23 @@ export default function App() {
   const [newVictimStatus, setNewVictimStatus] = useState<VictimStatus>('active');
   const [uploading, setUploading] = useState(false);
   const [victimToDelete, setVictimToDelete] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const isAdmin = true; // No login required, everyone is admin
+
+  // Test connection
+  useEffect(() => {
+    async function testConnection() {
+      try {
+        await getDocFromServer(firestoreDoc(db, 'test', 'connection'));
+      } catch (error) {
+        if(error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration. ");
+        }
+      }
+    }
+    if (db) testConnection();
+  }, []);
 
   // Report filters
   const [reportType, setReportType] = useState<'monthly' | 'yearly'>('monthly');
@@ -203,12 +273,16 @@ export default function App() {
     const unsubscribeVictims = onSnapshot(victimsQuery, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Victim));
       setVictims(data);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'victims', setError);
     });
 
     const visitsQuery = query(collection(db, 'visits'), orderBy('date', 'desc'));
     const unsubscribeVisits = onSnapshot(visitsQuery, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit));
       setVisits(data);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'visits', setError);
     });
 
     return () => {
@@ -282,26 +356,31 @@ export default function App() {
         attachmentName = file.name;
       }
 
+      const victimData = {
+        ...data,
+        attachmentUrl,
+        attachmentName,
+        updatedAt: serverTimestamp(),
+      };
+
       if (editingVictim) {
-        await updateDoc(doc(db, 'victims', editingVictim.id), {
-          ...data,
-          attachmentUrl,
-          attachmentName,
-          updatedAt: serverTimestamp(),
-        });
+        await updateDoc(doc(db, 'victims', editingVictim.id), victimData);
       } else {
         await addDoc(collection(db, 'victims'), {
-          ...data,
-          attachmentUrl,
-          attachmentName,
+          ...victimData,
           createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
         });
       }
+      
+      // Update active tab to the status of the saved victim so it appears immediately
+      if (data.status) {
+        setActiveTab(data.status);
+      }
+      
       setEditingVictim(null);
       setView('dashboard');
     } catch (error) {
-      console.error("Error saving victim", error);
+      handleFirestoreError(error, editingVictim ? OperationType.UPDATE : OperationType.CREATE, 'victims', setError);
       alert("Erro ao salvar cadastro. Verifique o tamanho do arquivo.");
     } finally {
       setUploading(false);
@@ -394,6 +473,31 @@ export default function App() {
     return (
       <div className="min-h-screen bg-purple-50 flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    let displayError = "Ocorreu um erro inesperado.";
+    try {
+      const parsed = JSON.parse(error || "{}");
+      if (parsed.error) {
+        displayError = `Erro no Firestore: ${parsed.error} (${parsed.operationType} em ${parsed.path})`;
+      }
+    } catch (e) {
+      displayError = error || displayError;
+    }
+
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-purple-50 p-4">
+        <div className="bg-white p-8 rounded-3xl shadow-2xl border-2 border-purple-100 max-w-md w-full text-center">
+          <ShieldAlert className="w-16 h-16 text-red-500 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold text-purple-900 mb-4">Ops! Algo deu errado</h2>
+          <p className="text-purple-700 mb-6">{displayError}</p>
+          <Button onClick={() => window.location.reload()} className="w-full">
+            Recarregar Página
+          </Button>
+        </div>
       </div>
     );
   }
