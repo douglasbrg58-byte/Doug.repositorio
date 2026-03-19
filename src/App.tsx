@@ -294,11 +294,15 @@ export default function App() {
   // Derived Data
   const filteredVictims = useMemo(() => {
     return victims.filter(v => {
-      const matchesStatus = v.status === activeTab;
       const matchesSearch = v.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                            v.internalCode?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                            v.processNumber.toLowerCase().includes(searchTerm.toLowerCase());
-      return matchesStatus && matchesSearch;
+      
+      // If searching, ignore tabs to find the victim anywhere
+      if (searchTerm) return matchesSearch;
+      
+      // Otherwise, filter by the active tab
+      return v.status === activeTab && matchesSearch;
     });
   }, [victims, activeTab, searchTerm]);
 
@@ -312,22 +316,31 @@ export default function App() {
 
   const filteredVisitsForReport = useMemo(() => {
     return visits.filter(v => {
-      const d = new Date(v.date);
+      if (!v.date) return false;
+      const [year, month] = v.date.split('-').map(Number);
       if (reportType === 'monthly') {
-        return d.getMonth() === reportMonth && d.getFullYear() === reportYear;
+        return (month - 1) === reportMonth && year === reportYear;
       }
-      return d.getFullYear() === reportYear;
+      return year === reportYear;
     });
   }, [visits, reportType, reportMonth, reportYear]);
 
   const filteredVictimsForReport = useMemo(() => {
     return victims.filter(v => {
-      if (!v.protectiveMeasureDate) return false;
-      const d = new Date(v.protectiveMeasureDate);
-      if (reportType === 'monthly') {
-        return d.getMonth() === reportMonth && d.getFullYear() === reportYear;
+      // Use protectiveMeasureDate if available, otherwise fallback to createdAt
+      let dateToUse = v.protectiveMeasureDate;
+      if (!dateToUse && v.createdAt) {
+        const d = v.createdAt.toDate ? v.createdAt.toDate() : new Date();
+        dateToUse = format(d, 'yyyy-MM-dd');
       }
-      return d.getFullYear() === reportYear;
+      
+      if (!dateToUse) return false;
+      
+      const [year, month] = dateToUse.split('-').map(Number);
+      if (reportType === 'monthly') {
+        return (month - 1) === reportMonth && year === reportYear;
+      }
+      return year === reportYear;
     });
   }, [victims, reportType, reportMonth, reportYear]);
 
@@ -339,9 +352,9 @@ export default function App() {
       let attachmentName = editingVictim?.attachmentName || '';
 
       if (file) {
-        // Check file size (max 1MB for Firestore document limit)
-        if (file.size > 800 * 1024) {
-          alert("O arquivo é muito grande. O limite é de 800KB para anexos.");
+        // Check file size (max 700KB to ensure Base64 doesn't exceed 1MB Firestore limit)
+        if (file.size > 700 * 1024) {
+          alert("O arquivo é muito grande. O limite é de 700KB para anexos.");
           setUploading(false);
           return;
         }
@@ -394,7 +407,7 @@ export default function App() {
         updatedAt: serverTimestamp() 
       });
     } catch (error) {
-      console.error("Error updating status", error);
+      handleFirestoreError(error, OperationType.UPDATE, 'victims', setError);
     }
   };
 
@@ -408,7 +421,7 @@ export default function App() {
       });
       setShowVisitModal(false);
     } catch (error) {
-      console.error("Error adding visit", error);
+      handleFirestoreError(error, OperationType.CREATE, 'visits', setError);
     }
   };
 
@@ -423,8 +436,7 @@ export default function App() {
       await deleteDoc(doc(db, 'victims', id));
       setVictimToDelete(null);
     } catch (error) {
-      console.error("Error deleting victim", error);
-      alert("Erro ao excluir cadastro.");
+      handleFirestoreError(error, OperationType.DELETE, 'victims', setError);
     }
   };
 
@@ -636,11 +648,14 @@ export default function App() {
                               <td className="px-6 py-4 text-sm">{victim.phone}</td>
                               <td className="px-6 py-4">
                                 <div className="flex gap-1">
-                                  {vVisits.slice(0, 3).map((v, i) => (
-                                    <span key={i} className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
-                                      {format(new Date(v.date), 'dd/MM')}
-                                    </span>
-                                  ))}
+                                  {vVisits.slice(0, 3).map((v, i) => {
+                                    const [year, month, day] = v.date.split('-').map(Number);
+                                    return (
+                                      <span key={i} className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
+                                        {`${day.toString().padStart(2, '0')}/${month.toString().padStart(2, '0')}`}
+                                      </span>
+                                    );
+                                  })}
                                   {vVisits.length > 3 && <span className="text-[10px] text-purple-400">+{vVisits.length - 3}</span>}
                                   {vVisits.length === 0 && <span className="text-xs text-purple-300">0</span>}
                                 </div>
@@ -871,14 +886,19 @@ export default function App() {
                       <ArrowLeft className="w-6 h-6" />
                     </button>
                     <div className="text-right">
-                      <p className="text-purple-200 text-sm font-mono uppercase tracking-widest">Código: {selectedVictim.internalCode || 'RECUSADO'}</p>
+                      <p className="text-purple-200 text-sm font-mono uppercase tracking-widest">Código: {selectedVictim.internalCode || '---'}</p>
                       <p className="text-white font-bold">Processo: {selectedVictim.processNumber}</p>
                     </div>
                   </div>
                   <h2 className="text-4xl font-black mb-2">{selectedVictim.name}</h2>
                   <div className="flex flex-wrap gap-4 text-purple-100">
                     <span className="flex items-center gap-1"><Phone className="w-4 h-4" /> {selectedVictim.phone}</span>
-                    <span className="flex items-center gap-1"><Calendar className="w-4 h-4" /> Medida: {selectedVictim.protectiveMeasureDate ? format(new Date(selectedVictim.protectiveMeasureDate), 'dd/MM/yyyy') : '---'}</span>
+                    <span className="flex items-center gap-1"><Calendar className="w-4 h-4" /> Medida: {selectedVictim.protectiveMeasureDate ? (
+                      (() => {
+                        const [y, m, d] = selectedVictim.protectiveMeasureDate.split('-').map(Number);
+                        return `${d.toString().padStart(2, '0')}/${m.toString().padStart(2, '0')}/${y}`;
+                      })()
+                    ) : '---'}</span>
                   </div>
                 </div>
 
@@ -940,14 +960,20 @@ export default function App() {
                             <div className="flex justify-between items-start mb-3">
                               <div className="flex items-center gap-3">
                                 <span className="bg-purple-600 text-white px-3 py-1 rounded-full text-xs font-bold">
-                                  {format(new Date(visit.date), 'dd/MM/yyyy')}
+                                  {(() => {
+                                    const [y, m, d] = visit.date.split('-').map(Number);
+                                    return `${d.toString().padStart(2, '0')}/${m.toString().padStart(2, '0')}/${y}`;
+                                  })()}
                                 </span>
                                 <span className={`text-xs font-black uppercase tracking-widest ${visit.type === 'victim' ? 'text-purple-600' : 'text-red-600'}`}>
                                   {visit.type === 'victim' ? '👤 Vítima' : '⚠️ Agressor'}
                                 </span>
                               </div>
-                              <span className="text-xs font-medium text-purple-400">
-                                {visit.situation.replace('_', ' ')}
+                              <span className="text-xs font-bold text-purple-500 bg-purple-50 px-2 py-0.5 rounded uppercase tracking-tighter">
+                                {visit.situation === 'first_visit' ? '1ª Visita' :
+                                 visit.situation === 'follow_up' ? 'Acompanhamento' :
+                                 visit.situation === 'emergency' ? 'Urgência' :
+                                 'Descumprimento'}
                               </span>
                             </div>
                             <p className="text-purple-800 text-sm">{visit.observation}</p>
