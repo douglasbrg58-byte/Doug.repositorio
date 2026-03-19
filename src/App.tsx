@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'; // Test Edit
+import React, { useState, useEffect, useMemo } from 'react';
 import { Victim, VictimStatus, Visit, VisitType, VisitSituation } from './types';
 import { 
   Plus, 
@@ -12,7 +12,6 @@ import {
   Edit, 
   History, 
   FileText,
-  LogOut,
   ChevronRight,
   Calendar,
   Phone,
@@ -40,6 +39,8 @@ const formatDate = (date: string | Date | undefined | null, pattern: string = 'd
     return '---';
   }
 };
+
+const generateId = () => Math.random().toString(36).substr(2, 9);
 
 // --- Components ---
 
@@ -158,49 +159,31 @@ export default function App() {
   const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
   const [showVisitModal, setShowVisitModal] = useState(false);
   const [newVictimStatus, setNewVictimStatus] = useState<VictimStatus>('active');
-  const [uploading, setUploading] = useState(false);
   const [victimToDelete, setVictimToDelete] = useState<string | null>(null);
-
-  const isAdmin = true;
 
   // Report filters
   const [reportType, setReportType] = useState<'monthly' | 'yearly'>('monthly');
   const [reportMonth, setReportMonth] = useState(new Date().getMonth());
   const [reportYear, setReportYear] = useState(new Date().getFullYear());
 
-  const fetchData = async () => {
-    try {
-      const [victimsRes, visitsRes] = await Promise.all([
-        fetch('/api/victims', { cache: 'no-store' }),
-        fetch('/api/visits', { cache: 'no-store' })
-      ]);
-      
-      if (victimsRes.ok) {
-        const victimsData = await victimsRes.json();
-        setVictims(victimsData);
-      }
-      
-      if (visitsRes.ok) {
-        const visitsData = await visitsRes.json();
-        setVisits(visitsData);
-      }
-    } catch (error) {
-      console.error("Error fetching data", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Data Fetching & Polling
+  // Load data from LocalStorage
   useEffect(() => {
-    fetchData();
+    const savedVictims = localStorage.getItem('victims');
+    const savedVisits = localStorage.getItem('visits');
     
-    const interval = setInterval(() => {
-      fetchData();
-    }, 5000);
-
-    return () => clearInterval(interval);
+    if (savedVictims) setVictims(JSON.parse(savedVictims));
+    if (savedVisits) setVisits(JSON.parse(savedVisits));
+    
+    setLoading(false);
   }, []);
+
+  // Save data to LocalStorage
+  useEffect(() => {
+    if (!loading) {
+      localStorage.setItem('victims', JSON.stringify(victims));
+      localStorage.setItem('visits', JSON.stringify(visits));
+    }
+  }, [victims, visits, loading]);
 
   // Derived Data
   const filteredVictims = useMemo(() => {
@@ -244,129 +227,89 @@ export default function App() {
 
   // Actions
   const handleSaveVictim = async (data: Partial<Victim>, file?: File) => {
-    setUploading(true);
-    try {
-      let attachmentUrl = editingVictim?.attachmentUrl || '';
-      let attachmentName = editingVictim?.attachmentName || '';
+    let attachmentUrl = editingVictim?.attachmentUrl || '';
+    let attachmentName = editingVictim?.attachmentName || '';
 
-      if (file) {
-        // Check file size (max 1MB for Firestore document limit)
-        if (file.size > 800 * 1024) {
-          alert("O arquivo é muito grande. O limite é de 800KB para anexos.");
-          setUploading(false);
-          return;
-        }
+    if (file) {
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+      });
+      reader.readAsDataURL(file);
+      attachmentUrl = await base64Promise;
+      attachmentName = file.name;
+    }
 
-        const reader = new FileReader();
-        const base64Promise = new Promise<string>((resolve, reject) => {
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-        });
-        reader.readAsDataURL(file);
-        attachmentUrl = await base64Promise;
-        attachmentName = file.name;
-      }
-
-      const victimData = {
-        ...data,
+    const now = new Date().toISOString();
+    
+    if (editingVictim) {
+      setVictims(prev => prev.map(v => v.id === editingVictim.id ? { 
+        ...v, 
+        ...data, 
+        attachmentUrl, 
+        attachmentName,
+        updatedAt: now 
+      } : v));
+    } else {
+      const newVictim: Victim = {
+        id: generateId(),
+        internalCode: data.internalCode || '',
+        processNumber: data.processNumber || '',
+        name: data.name || '',
+        phone: data.phone || '',
+        aggressorName: data.aggressorName || '',
+        protectiveMeasureDate: data.protectiveMeasureDate || '',
+        observations: data.observations || '',
+        status: data.status || 'active',
         attachmentUrl,
         attachmentName,
+        createdAt: now,
+        updatedAt: now,
       };
-
-      const url = editingVictim ? `/api/victims/${editingVictim.id}` : '/api/victims';
-      const method = editingVictim ? 'PUT' : 'POST';
-
-      const response = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(victimData),
-        cache: 'no-store'
-      });
-
-      if (!response.ok) throw new Error("Erro ao salvar vítima");
-      
-      await fetchData();
-      setEditingVictim(null);
-      setView('dashboard');
-    } catch (error: any) {
-      console.error("Error saving victim", error);
-      const errorMessage = error?.message || "Erro desconhecido";
-      alert(`Erro ao salvar cadastro: ${errorMessage}. Se houver anexo, verifique se o tamanho é inferior a 800KB.`);
-    } finally {
-      setUploading(false);
+      setVictims(prev => [...prev, newVictim]);
     }
+
+    setEditingVictim(null);
+    setView('dashboard');
   };
 
-  const handleUpdateStatus = async (id: string, status: VictimStatus) => {
-    try {
-      const response = await fetch(`/api/victims/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
-        cache: 'no-store'
-      });
-      if (response.ok) {
-        await fetchData();
-      }
-    } catch (error) {
-      console.error("Error updating status", error);
-    }
+  const handleUpdateStatus = (id: string, status: VictimStatus) => {
+    setVictims(prev => prev.map(v => v.id === id ? { ...v, status, updatedAt: new Date().toISOString() } : v));
   };
 
-  const handleAddVisit = async (data: Partial<Visit>) => {
+  const handleAddVisit = (data: Partial<Visit>) => {
     const victimId = selectedVictimId || editingVictim?.id;
     if (!victimId) return;
-    try {
-      const url = editingVisit ? `/api/visits/${editingVisit.id}` : '/api/visits';
-      const method = editingVisit ? 'PUT' : 'POST';
 
-      const response = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, victimId }),
-        cache: 'no-store'
-      });
-
-      if (!response.ok) throw new Error("Erro ao salvar visita");
-
-      await fetchData();
-      setShowVisitModal(false);
-      setEditingVisit(null);
-    } catch (error) {
-      console.error("Error adding visit", error);
+    if (editingVisit) {
+      setVisits(prev => prev.map(v => v.id === editingVisit.id ? { ...v, ...data } : v));
+    } else {
+      const newVisit: Visit = {
+        id: generateId(),
+        victimId,
+        date: data.date || '',
+        type: data.type || 'victim',
+        situation: data.situation || 'follow_up',
+        observation: data.observation || '',
+        createdAt: new Date().toISOString(),
+      };
+      setVisits(prev => [...prev, newVisit]);
     }
+
+    setShowVisitModal(false);
+    setEditingVisit(null);
   };
 
-  const handleDeleteVisit = async (visitId: string) => {
+  const handleDeleteVisit = (visitId: string) => {
     if (!window.confirm("Tem certeza que deseja excluir esta visita?")) return;
-    try {
-      const response = await fetch(`/api/visits/${visitId}`, {
-        method: 'DELETE',
-        cache: 'no-store'
-      });
-      if (response.ok) {
-        await fetchData();
-      }
-    } catch (error) {
-      console.error("Error deleting visit", error);
-    }
+    setVisits(prev => prev.filter(v => v.id !== visitId));
   };
 
-  const handleDeleteVictim = async (id: string) => {
-    if (!window.confirm("Tem certeza que deseja excluir este cadastro?")) return;
-    try {
-      const response = await fetch(`/api/victims/${id}`, {
-        method: 'DELETE',
-        cache: 'no-store'
-      });
-      if (response.ok) {
-        await fetchData();
-        setVictimToDelete(null);
-      }
-    } catch (error) {
-      console.error("Error deleting victim", error);
-      alert("Erro ao excluir cadastro.");
-    }
+  const handleDeleteVictim = (id: string) => {
+    setVictims(prev => prev.filter(v => v.id !== id));
+    setVisits(prev => prev.filter(v => v.victimId !== id));
+    setVictimToDelete(null);
   };
 
   const exportPDF = () => {
@@ -436,8 +379,7 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto p-4 md:p-6">
-        <>
-          {/* Navigation Actions */}
+        {/* Navigation Actions */}
         <div className="flex flex-wrap gap-3 mb-8">
           <Button 
             onClick={() => { setEditingVictim(null); setNewVictimStatus('active'); setView('new'); }} 
@@ -605,15 +547,13 @@ export default function App() {
                                   >
                                     <Edit className="w-5 h-5" />
                                   </Button>
-                                  {isAdmin && (
-                                    <Button 
-                                      variant="ghost" 
-                                      onClick={() => setVictimToDelete(victim.id)}
-                                      className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50"
-                                    >
-                                      <Trash2 className="w-5 h-5" />
-                                    </Button>
-                                  )}
+                                  <Button 
+                                    variant="ghost" 
+                                    onClick={() => setVictimToDelete(victim.id)}
+                                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50"
+                                  >
+                                    <Trash2 className="w-5 h-5" />
+                                  </Button>
                                 </div>
                               </td>
                             </tr>
@@ -627,7 +567,7 @@ export default function App() {
 
               {/* Delete Confirmation Modal */}
               <AnimatePresence>
-                {victimToDelete && isAdmin && (
+                {victimToDelete && (
                   <div className="fixed inset-0 bg-purple-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <motion.div 
                       initial={{ opacity: 0, scale: 0.9 }}
@@ -746,84 +686,9 @@ export default function App() {
                     />
                   </div>
 
-                  {editingVictim && (
-                    <div className="pt-6 border-t-2 border-purple-50">
-                      <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-lg font-bold text-purple-900 flex items-center gap-2">
-                          <History className="w-5 h-5 text-purple-600" /> Histórico de Visitas
-                        </h3>
-                        <Button 
-                          type="button" 
-                          variant="secondary" 
-                          onClick={() => { setEditingVisit(null); setShowVisitModal(true); }}
-                          className="text-xs py-1"
-                        >
-                          <Plus className="w-4 h-4" /> Nova Visita
-                        </Button>
-                      </div>
-                      
-                      <div className="space-y-3">
-                        {visits.filter(v => v.victimId === editingVictim.id).length === 0 ? (
-                          <p className="text-sm text-purple-400 italic text-center py-4 bg-purple-50 rounded-xl">
-                            Nenhuma visita registrada.
-                          </p>
-                        ) : (
-                          visits
-                            .filter(v => v.victimId === editingVictim.id)
-                            .sort((a, b) => new Date(b.date + 'T12:00:00').getTime() - new Date(a.date + 'T12:00:00').getTime())
-                            .map(visit => (
-                              <div key={visit.id} className="flex justify-between items-center p-3 bg-purple-50 rounded-xl border border-purple-100">
-                                <div>
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-xs font-bold bg-purple-200 text-purple-700 px-2 py-0.5 rounded">
-                                      {formatDate(visit.date)}
-                                    </span>
-                                    <span className="text-[10px] uppercase font-black text-purple-400">
-                                      {visit.type === 'victim' ? 'Vítima' : 'Agressor'}
-                                    </span>
-                                  </div>
-                                  <p className="text-xs text-purple-800 line-clamp-1">{visit.observation}</p>
-                                </div>
-                                <div className="flex gap-1">
-                                  <Button 
-                                    type="button" 
-                                    variant="ghost" 
-                                    onClick={() => { setEditingVisit(visit); setShowVisitModal(true); }}
-                                    className="p-1.5 h-auto"
-                                  >
-                                    <Edit className="w-4 h-4" />
-                                  </Button>
-                                  <Button 
-                                    type="button" 
-                                    variant="ghost" 
-                                    onClick={() => handleDeleteVisit(visit.id)}
-                                    className="p-1.5 h-auto text-red-400 hover:text-red-600"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </Button>
-                                </div>
-                              </div>
-                            ))
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex gap-4 pt-4">
-                    <Button type="submit" className="flex-1 py-4" disabled={uploading}>
-                      {uploading ? (
-                        <span className="flex items-center gap-2">
-                          <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                          Salvando...
-                        </span>
-                      ) : (
-                        <><Save className="w-5 h-5" /> Salvar Cadastro</>
-                      )}
-                    </Button>
-                    <Button variant="outline" onClick={() => setView('dashboard')} className="flex-1 py-4">
-                      Cancelar
-                    </Button>
-                  </div>
+                  <Button type="submit" className="w-full py-4 text-lg">
+                    <Save className="w-6 h-6" /> Salvar Cadastro
+                  </Button>
                 </form>
               </div>
             </motion.div>
@@ -834,99 +699,137 @@ export default function App() {
               key="case"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 1.05 }}
-              className="max-w-4xl mx-auto"
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="space-y-6"
             >
-              <div className="bg-white rounded-3xl border-2 border-purple-100 shadow-2xl overflow-hidden">
-                {/* Case Header */}
-                <div className="bg-purple-600 p-8 text-white">
-                  <div className="flex justify-between items-start mb-6">
-                    <button onClick={() => setView('dashboard')} className="p-2 hover:bg-white/10 rounded-full">
-                      <ArrowLeft className="w-6 h-6" />
-                    </button>
-                    <div className="text-right">
-                      <p className="text-purple-200 text-sm font-mono uppercase tracking-widest">Código: {selectedVictim.internalCode || 'RECUSADO'}</p>
-                      <p className="text-white font-bold">Processo: {selectedVictim.processNumber}</p>
+              <div className="flex items-center gap-4">
+                <button onClick={() => setView('dashboard')} className="p-2 hover:bg-purple-50 rounded-full text-purple-600">
+                  <ArrowLeft className="w-6 h-6" />
+                </button>
+                <h2 className="text-2xl font-bold text-purple-900">Detalhes do Caso</h2>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Victim Info Card */}
+                <div className="lg:col-span-1 space-y-6">
+                  <div className="bg-white p-6 rounded-2xl border-2 border-purple-100 shadow-sm">
+                    <div className="flex items-center gap-4 mb-6">
+                      <div className="bg-purple-100 p-3 rounded-full">
+                        <UserIcon className="w-6 h-6 text-purple-600" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-lg">{selectedVictim.name}</h3>
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                          selectedVictim.status === 'active' ? 'bg-green-100 text-green-700' :
+                          selectedVictim.status === 'inactive' ? 'bg-gray-100 text-gray-700' :
+                          'bg-red-100 text-red-700'
+                        }`}>
+                          {selectedVictim.status === 'active' ? 'Ativo' : selectedVictim.status === 'inactive' ? 'Inativo' : 'Recusou'}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                  <h2 className="text-4xl font-black mb-2">{selectedVictim.name}</h2>
-                  <div className="flex flex-wrap gap-4 text-purple-100">
-                    <span className="flex items-center gap-1"><Phone className="w-4 h-4" /> {selectedVictim.phone}</span>
-                    <span className="flex items-center gap-1"><Calendar className="w-4 h-4" /> Medida: {formatDate(selectedVictim.protectiveMeasureDate)}</span>
+
+                    <div className="space-y-4 text-sm">
+                      <div className="flex items-center gap-3 text-purple-600">
+                        <FileText className="w-4 h-4" />
+                        <span>Processo: <strong>{selectedVictim.processNumber}</strong></span>
+                      </div>
+                      <div className="flex items-center gap-3 text-purple-600">
+                        <Phone className="w-4 h-4" />
+                        <span>{selectedVictim.phone}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-purple-600">
+                        <ShieldAlert className="w-4 h-4" />
+                        <span>Agressor: <strong>{selectedVictim.aggressorName}</strong></span>
+                      </div>
+                      <div className="flex items-center gap-3 text-purple-600">
+                        <Calendar className="w-4 h-4" />
+                        <span>Medida desde: <strong>{formatDate(selectedVictim.protectiveMeasureDate)}</strong></span>
+                      </div>
+                    </div>
+
+                    <div className="mt-6 pt-6 border-t border-purple-50">
+                      <h4 className="text-xs font-bold text-purple-400 uppercase mb-2">Observações</h4>
+                      <p className="text-sm text-purple-800 bg-purple-50 p-3 rounded-lg italic">
+                        {selectedVictim.observations || 'Sem observações registradas.'}
+                      </p>
+                    </div>
+
+                    {selectedVictim.attachmentUrl && (
+                      <div className="mt-4">
+                        <a 
+                          href={selectedVictim.attachmentUrl} 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="flex items-center justify-center gap-2 w-full py-3 bg-purple-50 text-purple-600 rounded-xl font-bold text-sm hover:bg-purple-100 transition-colors"
+                        >
+                          <FileText className="w-5 h-5" /> Ver Documento Anexo
+                        </a>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <div className="p-8 grid grid-cols-1 md:grid-cols-3 gap-8">
-                  {/* Info Column */}
-                  <div className="md:col-span-1 space-y-8">
-                    <section>
-                      <h3 className="text-xs font-black text-purple-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                        <UserIcon className="w-4 h-4" /> Agressor
-                      </h3>
-                      <div className="bg-red-50 p-4 rounded-2xl border border-red-100">
-                        <p className="font-bold text-red-900">{selectedVictim.aggressorName}</p>
-                      </div>
-                    </section>
-
-                    <section>
-                      <h3 className="text-xs font-black text-purple-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                        <FileText className="w-4 h-4" /> Observações
-                      </h3>
-                      <p className="text-purple-700 text-sm leading-relaxed bg-purple-50 p-4 rounded-2xl italic">
-                        "{selectedVictim.observations || 'Sem observações registradas.'}"
-                      </p>
-                    </section>
-
-                    <section>
-                      <h3 className="text-xs font-black text-purple-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                        <ShieldAlert className="w-4 h-4" /> Status Atual
-                      </h3>
-                      <div className={`p-4 rounded-2xl font-bold text-center uppercase tracking-widest border ${
-                        selectedVictim.status === 'active' ? 'bg-green-50 text-green-700 border-green-100' :
-                        selectedVictim.status === 'inactive' ? 'bg-gray-50 text-gray-700 border-gray-100' :
-                        'bg-red-50 text-red-700 border-red-100'
-                      }`}>
-                        {selectedVictim.status}
-                      </div>
-                    </section>
-                  </div>
-
-                  {/* Visits Column */}
-                  <div className="md:col-span-2">
+                {/* Visits History */}
+                <div className="lg:col-span-2 space-y-6">
+                  <div className="bg-white p-6 rounded-2xl border-2 border-purple-100 shadow-sm">
                     <div className="flex justify-between items-center mb-6">
-                      <h3 className="text-xl font-bold text-purple-900 flex items-center gap-2">
+                      <h3 className="text-xl font-bold flex items-center gap-2">
                         <History className="w-6 h-6 text-purple-600" /> Histórico de Visitas
                       </h3>
-                      <Button onClick={() => setShowVisitModal(true)} variant="secondary" className="text-sm">
-                        <Plus className="w-4 h-4" /> Registrar Visita
+                      <Button onClick={() => { setEditingVisit(null); setShowVisitModal(true); }}>
+                        <Plus className="w-5 h-5" /> Registrar Visita
                       </Button>
                     </div>
 
                     <div className="space-y-4">
                       {victimVisits.length === 0 ? (
-                        <div className="text-center py-12 bg-purple-50 rounded-3xl border-2 border-dashed border-purple-100">
-                          <Calendar className="w-12 h-12 text-purple-200 mx-auto mb-2" />
-                          <p className="text-purple-400">Nenhuma visita registrada ainda.</p>
+                        <div className="text-center py-12 bg-purple-50 rounded-2xl border-2 border-dashed border-purple-100">
+                          <Calendar className="w-12 h-12 text-purple-200 mx-auto mb-4" />
+                          <p className="text-purple-400 font-medium">Nenhuma visita registrada para este caso.</p>
                         </div>
                       ) : (
-                        victimVisits.map(visit => (
-                          <div key={visit.id} className="bg-white p-5 rounded-2xl border-2 border-purple-50 hover:border-purple-200 transition-all shadow-sm">
-                            <div className="flex justify-between items-start mb-3">
-                              <div className="flex items-center gap-3">
+                        victimVisits
+                          .sort((a, b) => new Date(b.date + 'T12:00:00').getTime() - new Date(a.date + 'T12:00:00').getTime())
+                          .map(visit => (
+                            <div key={visit.id} className="p-4 bg-purple-50 rounded-2xl border border-purple-100 relative group">
+                              <div className="flex flex-wrap items-center gap-3 mb-2">
                                 <span className="bg-purple-600 text-white px-3 py-1 rounded-full text-xs font-bold">
                                   {formatDate(visit.date)}
                                 </span>
-                                <span className={`text-xs font-black uppercase tracking-widest ${visit.type === 'victim' ? 'text-purple-600' : 'text-red-600'}`}>
-                                  {visit.type === 'victim' ? '👤 Vítima' : '⚠️ Agressor'}
+                                <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                                  visit.type === 'victim' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'
+                                }`}>
+                                  {visit.type === 'victim' ? 'Visita à Vítima' : 'Visita ao Agressor'}
+                                </span>
+                                <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                                  visit.situation === 'violation' ? 'bg-red-100 text-red-700' : 'bg-purple-100 text-purple-700'
+                                }`}>
+                                  {visit.situation === 'first_visit' ? 'Primeira Visita' :
+                                   visit.situation === 'follow_up' ? 'Acompanhamento' :
+                                   visit.situation === 'emergency' ? 'Emergência' : 'Descumprimento'}
                                 </span>
                               </div>
-                              <span className="text-xs font-medium text-purple-400">
-                                {visit.situation.replace('_', ' ')}
-                              </span>
+                              <p className="text-purple-900 text-sm leading-relaxed">{visit.observation}</p>
+                              
+                              <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Button 
+                                  variant="ghost" 
+                                  onClick={() => { setEditingVisit(visit); setShowVisitModal(true); }}
+                                  className="p-1.5 h-auto bg-white shadow-sm"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  onClick={() => handleDeleteVisit(visit.id)}
+                                  className="p-1.5 h-auto bg-white shadow-sm text-red-400 hover:text-red-600"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
                             </div>
-                            <p className="text-purple-800 text-sm">{visit.observation}</p>
-                          </div>
-                        ))
+                          ))
                       )}
                     </div>
                   </div>
@@ -943,114 +846,103 @@ export default function App() {
               exit={{ opacity: 0, y: -20 }}
               className="max-w-4xl mx-auto"
             >
-              <div className="bg-white p-8 rounded-3xl border-2 border-purple-100 shadow-xl">
-                  <div className="flex justify-between items-center mb-10">
-                    <h2 className="text-3xl font-black text-purple-900 flex items-center gap-3">
-                      <BarChart3 className="w-8 h-8 text-purple-600" /> Relatório Geral
-                    </h2>
-                    <div className="flex gap-4 items-end">
-                      <div className="flex flex-col gap-1">
-                        <label className="text-xs font-bold text-purple-400 uppercase">Tipo</label>
-                        <select 
-                          value={reportType} 
-                          onChange={(e) => setReportType(e.target.value as 'monthly' | 'yearly')}
-                          className="px-3 py-2 border-2 border-purple-100 rounded-lg focus:border-purple-400 focus:outline-none bg-white text-sm"
-                        >
-                          <option value="monthly">Mensal</option>
-                          <option value="yearly">Anual</option>
-                        </select>
-                      </div>
-                      
-                      {reportType === 'monthly' && (
-                        <div className="flex flex-col gap-1">
-                          <label className="text-xs font-bold text-purple-400 uppercase">Mês</label>
-                          <select 
-                            value={reportMonth} 
-                            onChange={(e) => setReportMonth(parseInt(e.target.value))}
-                            className="px-3 py-2 border-2 border-purple-100 rounded-lg focus:border-purple-400 focus:outline-none bg-white text-sm"
-                          >
-                            {Array.from({ length: 12 }).map((_, i) => (
-                              <option key={i} value={i}>{format(new Date(2024, i), 'MMMM', { locale: ptBR })}</option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-
-                      <div className="flex flex-col gap-1">
-                        <label className="text-xs font-bold text-purple-400 uppercase">Ano</label>
-                        <select 
-                          value={reportYear} 
-                          onChange={(e) => setReportYear(parseInt(e.target.value))}
-                          className="px-3 py-2 border-2 border-purple-100 rounded-lg focus:border-purple-400 focus:outline-none bg-white text-sm"
-                        >
-                          {[2024, 2025, 2026, 2027].map(y => (
-                            <option key={y} value={y}>{y}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <Button onClick={exportPDF}>
-                        <Download className="w-5 h-5" /> Exportar PDF
-                      </Button>
-                    </div>
+              <div className="bg-white p-8 rounded-2xl border-2 border-purple-100 shadow-xl">
+                <div className="flex items-center justify-between mb-8">
+                  <div className="flex items-center gap-4">
+                    <button onClick={() => setView('dashboard')} className="p-2 hover:bg-purple-50 rounded-full text-purple-600">
+                      <ArrowLeft className="w-6 h-6" />
+                    </button>
+                    <h2 className="text-2xl font-bold text-purple-900">Relatórios e Estatísticas</h2>
                   </div>
+                  <Button onClick={exportPDF} variant="primary">
+                    <Download className="w-5 h-5" /> Exportar PDF
+                  </Button>
+                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-                  <div className="bg-purple-50 p-6 rounded-2xl border-2 border-purple-100 text-center">
-                    <p className="text-purple-400 text-xs font-black uppercase tracking-widest mb-2">Vítimas Ativas</p>
-                    <p className="text-5xl font-black text-purple-900">{filteredVictimsForReport.filter(v => v.status === 'active').length}</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                  <div className="bg-purple-50 p-6 rounded-2xl border border-purple-100">
+                    <p className="text-xs font-bold text-purple-400 uppercase mb-1">Total de Vítimas</p>
+                    <p className="text-3xl font-black text-purple-900">{victims.length}</p>
                   </div>
-                  <div className="bg-purple-50 p-6 rounded-2xl border-2 border-purple-100 text-center">
-                    <p className="text-purple-400 text-xs font-black uppercase tracking-widest mb-2">Vítimas Inativas</p>
-                    <p className="text-5xl font-black text-purple-900">{filteredVictimsForReport.filter(v => v.status === 'inactive').length}</p>
+                  <div className="bg-green-50 p-6 rounded-2xl border border-green-100">
+                    <p className="text-xs font-bold text-green-400 uppercase mb-1">Casos Ativos</p>
+                    <p className="text-3xl font-black text-green-700">{victims.filter(v => v.status === 'active').length}</p>
                   </div>
-                  <div className="bg-purple-50 p-6 rounded-2xl border-2 border-purple-100 text-center">
-                    <p className="text-purple-400 text-xs font-black uppercase tracking-widest mb-2">Recusaram</p>
-                    <p className="text-5xl font-black text-purple-900">{filteredVictimsForReport.filter(v => v.status === 'refused').length}</p>
+                  <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100">
+                    <p className="text-xs font-bold text-blue-400 uppercase mb-1">Total de Visitas</p>
+                    <p className="text-3xl font-black text-blue-700">{visits.length}</p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <div className="space-y-6">
-                    <h3 className="text-lg font-bold text-purple-900 border-b-2 border-purple-100 pb-2">Estatísticas de Visitas</h3>
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center">
-                        <span className="text-purple-600">Total de Visitas Realizadas</span>
-                        <span className="font-bold text-xl">{filteredVisitsForReport.length}</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-purple-600">Visitas a Agressores</span>
-                        <span className="font-bold text-xl">{filteredVisitsForReport.filter(v => v.type === 'aggressor').length}</span>
-                      </div>
-                      <div className="flex justify-between items-center text-red-600">
-                        <span className="flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> Descumprimento de Medida</span>
-                        <span className="font-bold text-xl">{filteredVisitsForReport.filter(v => v.situation === 'violation').length}</span>
-                      </div>
-                    </div>
+                <div className="bg-purple-50 p-6 rounded-2xl border-2 border-purple-100 mb-8">
+                  <h3 className="font-bold mb-4 flex items-center gap-2">
+                    <Calendar className="w-5 h-5 text-purple-600" /> Filtrar Período do Relatório
+                  </h3>
+                  <div className="flex flex-wrap gap-4">
+                    <Select 
+                      label="Tipo" 
+                      value={reportType} 
+                      onChange={(e) => setReportType(e.target.value as 'monthly' | 'yearly')}
+                      options={[
+                        { value: 'monthly', label: 'Mensal' },
+                        { value: 'yearly', label: 'Anual' }
+                      ]}
+                      className="flex-1 min-w-[150px]"
+                    />
+                    {reportType === 'monthly' && (
+                      <Select 
+                        label="Mês" 
+                        value={reportMonth.toString()} 
+                        onChange={(e) => setReportMonth(parseInt(e.target.value))}
+                        options={[
+                          { value: '0', label: 'Janeiro' },
+                          { value: '1', label: 'Fevereiro' },
+                          { value: '2', label: 'Março' },
+                          { value: '3', label: 'Abril' },
+                          { value: '4', label: 'Maio' },
+                          { value: '5', label: 'Junho' },
+                          { value: '6', label: 'Julho' },
+                          { value: '7', label: 'Agosto' },
+                          { value: '8', label: 'Setembro' },
+                          { value: '9', label: 'Outubro' },
+                          { value: '10', label: 'Novembro' },
+                          { value: '11', label: 'Dezembro' }
+                        ]}
+                        className="flex-1 min-w-[150px]"
+                      />
+                    )}
+                    <Select 
+                      label="Ano" 
+                      value={reportYear.toString()} 
+                      onChange={(e) => setReportYear(parseInt(e.target.value))}
+                      options={[
+                        { value: '2024', label: '2024' },
+                        { value: '2025', label: '2025' },
+                        { value: '2026', label: '2026' }
+                      ]}
+                      className="flex-1 min-w-[150px]"
+                    />
                   </div>
+                </div>
 
-                  <div className="bg-purple-900 text-white p-8 rounded-3xl relative overflow-hidden">
-                    <ShieldAlert className="absolute -right-4 -bottom-4 w-32 h-32 text-white/10" />
-                    <h3 className="text-xl font-bold mb-4">Resumo do Período</h3>
-                    <p className="text-purple-200 text-sm mb-6">Acompanhamento realizado pela Patrulha Maria da Penha em Querência/MT.</p>
-                    <div className="space-y-4">
-                      <div className="text-4xl font-black">
-                        {filteredVictimsForReport.length} <span className="text-lg font-normal text-purple-300">Casos no Período</span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2 pt-4 border-t border-white/10">
-                        <div className="text-center">
-                          <p className="text-[10px] uppercase font-bold text-purple-300">Ativas</p>
-                          <p className="text-xl font-black">{filteredVictimsForReport.filter(v => v.status === 'active').length}</p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-[10px] uppercase font-bold text-purple-300">Inativas</p>
-                          <p className="text-xl font-black">{filteredVictimsForReport.filter(v => v.status === 'inactive').length}</p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-[10px] uppercase font-bold text-purple-300">Recusaram</p>
-                          <p className="text-xl font-black">{filteredVictimsForReport.filter(v => v.status === 'refused').length}</p>
-                        </div>
-                      </div>
+                <div className="space-y-4">
+                  <h3 className="font-bold text-lg text-purple-900">Resumo do Período</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="flex justify-between p-4 bg-white border border-purple-100 rounded-xl">
+                      <span className="text-purple-600">Vítimas no Período</span>
+                      <span className="font-bold">{filteredVictimsForReport.length}</span>
+                    </div>
+                    <div className="flex justify-between p-4 bg-white border border-purple-100 rounded-xl">
+                      <span className="text-purple-600">Visitas no Período</span>
+                      <span className="font-bold">{filteredVisitsForReport.length}</span>
+                    </div>
+                    <div className="flex justify-between p-4 bg-white border border-purple-100 rounded-xl">
+                      <span className="text-purple-600">Visitas a Agressores</span>
+                      <span className="font-bold">{filteredVisitsForReport.filter(v => v.type === 'aggressor').length}</span>
+                    </div>
+                    <div className="flex justify-between p-4 bg-white border border-purple-100 rounded-xl">
+                      <span className="text-purple-600">Descumprimentos</span>
+                      <span className="font-bold text-red-600">{filteredVisitsForReport.filter(v => v.situation === 'violation').length}</span>
                     </div>
                   </div>
                 </div>
@@ -1058,87 +950,81 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
-        </>
+
+        {/* Visit Modal */}
+        <AnimatePresence>
+          {showVisitModal && (
+            <div className="fixed inset-0 bg-purple-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                className="bg-white p-8 rounded-3xl shadow-2xl max-w-lg w-full"
+              >
+                <h3 className="text-2xl font-bold text-purple-900 mb-6">
+                  {editingVisit ? '✏️ Editar Visita' : '📅 Registrar Visita'}
+                </h3>
+                <form className="space-y-4" onSubmit={(e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.currentTarget);
+                  handleAddVisit({
+                    date: formData.get('date') as string,
+                    type: formData.get('type') as VisitType,
+                    situation: formData.get('situation') as VisitSituation,
+                    observation: formData.get('observation') as string,
+                  });
+                }}>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Input label="Data da Visita" name="date" type="date" required defaultValue={editingVisit?.date || format(new Date(), 'yyyy-MM-dd')} />
+                    <Select 
+                      label="Tipo de Visita" 
+                      name="type" 
+                      defaultValue={editingVisit?.type || 'victim'}
+                      options={[
+                        { value: 'victim', label: 'Vítima' },
+                        { value: 'aggressor', label: 'Agressor' }
+                      ]} 
+                    />
+                  </div>
+                  <Select 
+                    label="Situação" 
+                    name="situation" 
+                    defaultValue={editingVisit?.situation || 'follow_up'}
+                    options={[
+                      { value: 'first_visit', label: 'Primeira Visita' },
+                      { value: 'follow_up', label: 'Acompanhamento' },
+                      { value: 'emergency', label: 'Emergência' },
+                      { value: 'violation', label: 'Descumprimento de Medida' }
+                    ]} 
+                  />
+                  <div className="flex flex-col gap-1">
+                    <label className="text-sm font-semibold text-purple-900">Relatório da Visita</label>
+                    <textarea 
+                      name="observation"
+                      required
+                      defaultValue={editingVisit?.observation}
+                      placeholder="Descreva como foi a visita..."
+                      className="px-3 py-2 border-2 border-purple-100 rounded-lg focus:border-purple-400 focus:outline-none transition-colors bg-white text-purple-900 min-h-[120px]"
+                    />
+                  </div>
+                  <div className="flex gap-3 pt-4">
+                    <Button type="submit" className="flex-1">Salvar Visita</Button>
+                    <Button variant="outline" onClick={() => { setShowVisitModal(false); setEditingVisit(null); }} className="flex-1">Cancelar</Button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </main>
 
-      {/* Visit Modal */}
-      <AnimatePresence>
-        {showVisitModal && (
-          <div className="fixed inset-0 bg-purple-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border-t-8 border-purple-600"
-            >
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-2xl font-bold text-purple-900 flex items-center gap-2">
-                  <Calendar className="w-6 h-6 text-purple-600" /> {editingVisit ? 'Editar Visita' : 'Nova Visita'}
-                </h3>
-                <button onClick={() => { setShowVisitModal(false); setEditingVisit(null); }} className="text-purple-400 hover:text-purple-600">
-                  <UserX className="w-6 h-6" />
-                </button>
-              </div>
-              <form className="space-y-6" onSubmit={(e) => {
-                e.preventDefault();
-                const formData = new FormData(e.currentTarget);
-                handleAddVisit({
-                  date: formData.get('date') as string,
-                  type: formData.get('type') as VisitType,
-                  situation: formData.get('situation') as VisitSituation,
-                  observation: formData.get('observation') as string,
-                });
-              }}>
-                <Input label="Data da Visita" name="date" type="date" required defaultValue={editingVisit?.date || format(new Date(), 'yyyy-MM-dd')} />
-                
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm font-semibold text-purple-900">Tipo de Visita</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="flex items-center gap-2 p-3 border-2 border-purple-50 rounded-xl cursor-pointer hover:bg-purple-50 transition-colors has-[:checked]:bg-purple-100 has-[:checked]:border-purple-400">
-                      <input type="radio" name="type" value="victim" defaultChecked={!editingVisit || editingVisit.type === 'victim'} className="hidden" />
-                      <span className="text-sm font-bold">👤 Vítima</span>
-                    </label>
-                    <label className="flex items-center gap-2 p-3 border-2 border-purple-50 rounded-xl cursor-pointer hover:bg-purple-50 transition-colors has-[:checked]:bg-red-100 has-[:checked]:border-red-400">
-                      <input type="radio" name="type" value="aggressor" defaultChecked={editingVisit?.type === 'aggressor'} className="hidden" />
-                      <span className="text-sm font-bold">⚠️ Agressor</span>
-                    </label>
-                  </div>
-                </div>
-
-                <Select 
-                  label="Situação" 
-                  name="situation" 
-                  defaultValue={editingVisit?.situation || 'follow_up'}
-                  options={[
-                    { value: 'first_visit', label: '1ª Visita' },
-                    { value: 'follow_up', label: 'Acompanhamento' },
-                    { value: 'emergency', label: 'Atendimento de Urgência' },
-                    { value: 'violation', label: 'Descumprimento de Medida' }
-                  ]} 
-                />
-
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-semibold text-purple-900">Observação</label>
-                  <textarea 
-                    name="observation"
-                    defaultValue={editingVisit?.observation}
-                    className="px-3 py-2 border-2 border-purple-100 rounded-lg focus:border-purple-400 focus:outline-none transition-colors bg-white text-purple-900 min-h-[80px]"
-                  />
-                </div>
-
-                <div className="flex gap-4 pt-4">
-                  <Button type="submit" className="flex-1 py-4">{editingVisit ? 'Atualizar' : 'Salvar'}</Button>
-                  <Button variant="outline" onClick={() => { setShowVisitModal(false); setEditingVisit(null); }} className="flex-1 py-4">Cancelar</Button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Footer */}
-      <footer className="mt-20 py-10 border-t border-purple-100 text-center text-purple-300 text-sm">
-        <p>© 2026 Rede Segura – Patrulha Maria da Penha – Querência/MT</p>
+      <footer className="mt-12 py-8 bg-purple-50 border-t border-purple-100 text-center">
+        <p className="text-sm text-purple-400 font-medium">
+          © 2026 Central de Acompanhamento – Patrulha Maria da Penha
+        </p>
+        <p className="text-[10px] text-purple-300 mt-1 uppercase tracking-widest">
+          Sistema de Gestão de Medidas Protetivas
+        </p>
       </footer>
     </div>
   );
