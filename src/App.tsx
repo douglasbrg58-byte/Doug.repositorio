@@ -225,6 +225,31 @@ export default function App() {
     });
   }, [victims, reportType, reportMonth, reportYear]);
 
+  // Helper to calculate days since last visit
+  const getDaysSinceLastVisit = (victim: Victim, allVisits: Visit[]) => {
+    const victimVisits = allVisits.filter(v => v.victimId === victim.id);
+    let lastDate: Date;
+    
+    if (victimVisits.length > 0) {
+      const dates = victimVisits.map(v => new Date(v.date + 'T12:00:00').getTime());
+      lastDate = new Date(Math.max(...dates));
+    } else if (victim.protectiveMeasureDate) {
+      lastDate = new Date(victim.protectiveMeasureDate + 'T12:00:00');
+    } else {
+      lastDate = new Date(victim.createdAt);
+    }
+    
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    const diffTime = today.getTime() - lastDate.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
+  };
+
+  const delayedVictimsCount = useMemo(() => {
+    return victims.filter(v => v.status === 'active' && getDaysSinceLastVisit(v, visits) > 10).length;
+  }, [victims, visits]);
+
   // Actions
   const handleSaveVictim = async (data: Partial<Victim>, file?: File) => {
     let attachmentUrl = editingVictim?.attachmentUrl || '';
@@ -446,11 +471,16 @@ export default function App() {
               <div className="grid grid-cols-3 gap-2 mb-6">
                 <button 
                   onClick={() => setActiveTab('active')}
-                  className={`p-4 rounded-xl flex flex-col items-center gap-2 transition-all ${activeTab === 'active' ? 'bg-purple-600 text-white shadow-lg scale-105' : 'bg-purple-50 text-purple-600 hover:bg-purple-100'}`}
+                  className={`p-4 rounded-xl flex flex-col items-center gap-2 transition-all relative ${activeTab === 'active' ? 'bg-purple-600 text-white shadow-lg scale-105' : 'bg-purple-50 text-purple-600 hover:bg-purple-100'}`}
                 >
                   <Users className="w-6 h-6" />
                   <span className="font-bold text-sm md:text-base">📋 Vítimas Ativas</span>
                   <span className="text-xs opacity-80">{victims.filter(v => v.status === 'active').length} casos</span>
+                  {delayedVictimsCount > 0 && (
+                    <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg animate-pulse">
+                      {delayedVictimsCount} em atraso
+                    </span>
+                  )}
                 </button>
                 <button 
                   onClick={() => setActiveTab('inactive')}
@@ -496,13 +526,23 @@ export default function App() {
                       ) : (
                         filteredVictims.map(victim => {
                           const vVisits = visits.filter(vis => vis.victimId === victim.id);
+                          const daysSinceLast = getDaysSinceLastVisit(victim, visits);
+                          const isDelayed = victim.status === 'active' && daysSinceLast > 10;
+
                           return (
-                            <tr key={victim.id} className="hover:bg-purple-50/50 transition-colors group">
+                            <tr key={victim.id} className={`hover:bg-purple-50/50 transition-colors group ${isDelayed ? 'bg-red-50' : ''}`}>
                               <td className="px-6 py-4 font-mono text-sm font-bold text-purple-600">
                                 {victim.internalCode || 'RECUSADO'}
                               </td>
                               <td className="px-6 py-4 text-sm">{victim.processNumber}</td>
-                              <td className="px-6 py-4 font-semibold">{victim.name}</td>
+                              <td className="px-6 py-4 font-semibold flex items-center gap-2">
+                                {victim.name}
+                                {isDelayed && (
+                                  <span title={`Atraso de ${daysSinceLast} dias`} className="text-red-500">
+                                    <AlertTriangle className="w-4 h-4" />
+                                  </span>
+                                )}
+                              </td>
                               <td className="px-6 py-4 text-sm">{victim.phone}</td>
                               <td className="px-6 py-4">
                                 <div className="flex gap-1">
