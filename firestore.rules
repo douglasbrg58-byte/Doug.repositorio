@@ -26,7 +26,6 @@ service cloud.firestore {
     //   - protectiveMeasureDate: string (optional) - Date string
     //   - observations: string (optional) - Observations
     //   - status: string (required) - 'active', 'inactive', 'refused'
-    //   - refusalDate: string (optional) - Date string for refusal
     //   - attachmentUrl: string (optional) - Attachment URL
     //   - attachmentName: string (optional) - Attachment name
     //   - createdAt: string (required) - ISO 8601 timestamp
@@ -105,12 +104,11 @@ service cloud.firestore {
 
     function isValidVictim(data) {
       return hasRequiredFields(['id', 'processNumber', 'name', 'status', 'createdAt', 'updatedAt']) &&
-             hasOnlyAllowedFields(['id', 'internalCode', 'processNumber', 'name', 'phone', 'aggressorName', 'protectiveMeasureDate', 'observations', 'status', 'attachmentUrl', 'attachmentName', 'refusalDate', 'createdAt', 'updatedAt']) &&
+             hasOnlyAllowedFields(['id', 'internalCode', 'processNumber', 'name', 'phone', 'aggressorName', 'protectiveMeasureDate', 'observations', 'status', 'attachmentUrl', 'attachmentName', 'createdAt', 'updatedAt']) &&
              data.id is string && data.id.size() > 0 &&
              data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
              data.processNumber is string && data.processNumber.size() > 0 && data.processNumber.size() < 100 &&
              data.status in ['active', 'inactive', 'refused'] &&
-             (!('refusalDate' in data) || data.refusalDate == null || isValidDateString(data.refusalDate)) &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
     }

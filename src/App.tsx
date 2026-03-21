@@ -26,7 +26,6 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import imageCompression from 'browser-image-compression';
 import { 
   db, 
   collection, 
@@ -35,7 +34,6 @@ import {
   setDoc, 
   updateDoc, 
   deleteDoc, 
-  onSnapshot,
   handleFirestoreError, 
   OperationType 
 } from './firebase';
@@ -172,7 +170,6 @@ const Select = ({
 
 export default function App() {
   const [loading, setLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
   const [view, setView] = useState<'dashboard' | 'new' | 'case' | 'reports'>('dashboard');
   const [activeTab, setActiveTab] = useState<VictimStatus>('active');
   const [victims, setVictims] = useState<Victim[]>([]);
@@ -184,42 +181,34 @@ export default function App() {
   const [showVisitModal, setShowVisitModal] = useState(false);
   const [newVictimStatus, setNewVictimStatus] = useState<VictimStatus>('active');
   const [victimToDelete, setVictimToDelete] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  };
 
   // Report filters
   const [reportType, setReportType] = useState<'monthly' | 'yearly'>('monthly');
   const [reportMonth, setReportMonth] = useState(new Date().getMonth());
   const [reportYear, setReportYear] = useState(new Date().getFullYear());
 
-  // Initial load with onSnapshot for real-time updates
-  useEffect(() => {
-    setLoading(true);
-    
-    const unsubscribeVictims = onSnapshot(collection(db, 'victims'), (snapshot) => {
-      const victimsData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Victim));
+  // Function to fetch data from Firebase
+  const fetchData = async (showLoading = true) => {
+    try {
+      if (showLoading) setLoading(true);
+      const victimsSnapshot = await getDocs(collection(db, 'victims'));
+      const visitsSnapshot = await getDocs(collection(db, 'visits'));
+      
+      const victimsData = victimsSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Victim));
+      const visitsData = visitsSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Visit));
+      
       setVictims(victimsData);
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'victims');
-      setLoading(false);
-    });
-
-    const unsubscribeVisits = onSnapshot(collection(db, 'visits'), (snapshot) => {
-      const visitsData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Visit));
       setVisits(visitsData);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'visits');
-    });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, 'data');
+    } finally {
+      if (showLoading) setLoading(false);
+    }
+  };
 
-    return () => {
-      unsubscribeVictims();
-      unsubscribeVisits();
-    };
+  // Initial load
+  useEffect(() => {
+    fetchData();
   }, []);
 
   // Derived Data
@@ -310,44 +299,17 @@ export default function App() {
 
   // Actions
   const handleSaveVictim = async (data: Partial<Victim>, file?: File) => {
-    if (isSaving) return;
-    
     try {
-      setIsSaving(true);
       let attachmentUrl = editingVictim?.attachmentUrl || '';
       let attachmentName = editingVictim?.attachmentName || '';
 
       if (file) {
-        let fileToUpload = file;
-        
-        // If it's an image, try to compress it
-        if (file.type.startsWith('image/')) {
-          const options = {
-            maxSizeMB: 0.7, // Target size under 700KB
-            maxWidthOrHeight: 1920,
-            useWebWorker: true,
-          };
-          try {
-            fileToUpload = await imageCompression(file, options);
-          } catch (error) {
-            console.error('Compression error:', error);
-          }
-        }
-
-        // Final size check (Base64 adds ~33% overhead, Firestore limit is 1MB)
-        // 700KB * 1.33 = 931KB, which fits in 1MB
-        if (fileToUpload.size > 700 * 1024) {
-          showToast('O arquivo é muito grande. O limite é de aproximadamente 700KB.', 'error');
-          setIsSaving(false);
-          return;
-        }
-
         const reader = new FileReader();
         const base64Promise = new Promise<string>((resolve, reject) => {
           reader.onload = () => resolve(reader.result as string);
           reader.onerror = reject;
         });
-        reader.readAsDataURL(fileToUpload);
+        reader.readAsDataURL(file);
         attachmentUrl = await base64Promise;
         attachmentName = file.name;
       }
@@ -373,7 +335,7 @@ export default function App() {
         const newVictim: Victim = {
           id,
           internalCode: finalData.internalCode,
-          refusalDate: finalData.refusalDate,
+          refusalDate: finalData.refusalDate || null,
           processNumber: data.processNumber || '',
           name: data.name || '',
           phone: data.phone || '',
@@ -386,30 +348,24 @@ export default function App() {
           createdAt: now,
           updatedAt: now,
         };
-        await setDoc(doc(db, 'victims', id), newVictim);
+        await setDoc(doc(db, 'victims', id), cleanData(newVictim));
       }
 
+      await fetchData();
       setEditingVictim(null);
       setView('dashboard');
-      showToast(editingVictim ? 'Cadastro atualizado com sucesso!' : 'Novo cadastro salvo com sucesso!');
     } catch (error) {
-      showToast('Erro ao salvar cadastro. Verifique o tamanho do anexo.', 'error');
       handleFirestoreError(error, OperationType.WRITE, 'victims');
-    } finally {
-      setIsSaving(false);
     }
   };
 
   const handleUpdateStatus = async (id: string, status: VictimStatus) => {
     try {
       const victim = victims.find(v => v.id === id);
-      if (!victim) {
-        showToast('Vítima não encontrada.', 'error');
-        return;
-      }
-      
+      if (!victim) return;
+
       if (status === 'active' && (!victim.internalCode)) {
-        setEditingVictim(victim || null);
+        setEditingVictim(victim);
         setNewVictimStatus('active');
         setView('new');
         return;
@@ -419,14 +375,13 @@ export default function App() {
       const now = new Date().toISOString();
       await updateDoc(victimRef, cleanData({ 
         status, 
-        internalCode: status === 'refused' ? '' : (victim?.internalCode || ''),
-        refusalDate: status === 'refused' ? (victim?.refusalDate || now.split('T')[0]) : null,
+        internalCode: status === 'refused' ? '' : (victim.internalCode || ''),
+        refusalDate: status === 'refused' ? (victim.refusalDate || now.split('T')[0]) : null,
         updatedAt: now 
       }));
-      showToast('Status atualizado com sucesso!');
+      await fetchData();
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `victims/${id}`);
-      showToast('Erro ao atualizar status.', 'error');
     }
   };
 
@@ -454,15 +409,14 @@ export default function App() {
           observation: data.observation || '',
           createdAt: now,
         };
-        await setDoc(doc(db, 'visits', id), newVisit);
+        await setDoc(doc(db, 'visits', id), cleanData(newVisit));
       }
 
+      await fetchData();
       setShowVisitModal(false);
       setEditingVisit(null);
-      showToast(editingVisit ? 'Visita atualizada com sucesso!' : 'Nova visita salva com sucesso!');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'visits');
-      showToast('Erro ao salvar visita.', 'error');
     }
   };
 
@@ -470,10 +424,9 @@ export default function App() {
     try {
       if (!window.confirm("Tem certeza que deseja excluir esta visita?")) return;
       await deleteDoc(doc(db, 'visits', visitId));
-      showToast('Visita excluída com sucesso!');
+      await fetchData();
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `visits/${visitId}`);
-      showToast('Erro ao excluir visita.', 'error');
     }
   };
 
@@ -481,18 +434,12 @@ export default function App() {
     try {
       if (window.confirm('Tem certeza que deseja excluir este registro?')) {
         await deleteDoc(doc(db, 'victims', id));
-        // Also delete associated visits
-        const victimVisits = visits.filter(v => v.victimId === id);
-        for (const visit of victimVisits) {
-          await deleteDoc(doc(db, 'visits', visit.id));
-        }
+        await fetchData();
         setVictimToDelete(null);
         if (selectedVictimId === id) setView('dashboard');
-        showToast('Registro excluído com sucesso!');
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `victims/${id}`);
-      showToast('Erro ao excluir registro.', 'error');
     }
   };
 
@@ -547,22 +494,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-white text-purple-900 font-sans">
-      <AnimatePresence>
-        {toast && (
-          <motion.div
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 50 }}
-            className={`fixed bottom-6 right-6 px-6 py-3 rounded-xl shadow-lg z-50 flex items-center gap-3 ${
-              toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'
-            }`}
-          >
-            {toast.type === 'success' ? <ShieldAlert size={20} /> : <AlertTriangle size={20} />}
-            <span className="font-medium">{toast.message}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      
       {/* Header */}
       <header className="bg-purple-600 text-white p-4 shadow-lg sticky top-0 z-10">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
@@ -927,14 +858,8 @@ export default function App() {
                     />
                   </div>
 
-                  <Button type="submit" className="w-full py-4 text-lg" disabled={isSaving}>
-                    {isSaving ? (
-                      <div className="animate-spin rounded-full h-6 w-6 border-2 border-white border-t-transparent"></div>
-                    ) : (
-                      <>
-                        <Save className="w-6 h-6" /> Salvar Cadastro
-                      </>
-                    )}
+                  <Button type="submit" className="w-full py-4 text-lg">
+                    <Save className="w-6 h-6" /> Salvar Cadastro
                   </Button>
                 </form>
               </div>
