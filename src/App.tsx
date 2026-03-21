@@ -245,6 +245,22 @@ export default function App() {
       return v.status === activeTab;
     });
 
+    // Ordenação dinâmica para a aba "Vítimas Ativas"
+    if (activeTab === 'active' && term === '') {
+      return [...filtered].sort((a, b) => {
+        const codeA = a.internalCode || '';
+        const codeB = b.internalCode || '';
+        
+        // Registros sem código ficam por último
+        if (!codeA && codeB) return 1;
+        if (codeA && !codeB) return -1;
+        if (!codeA && !codeB) return 0;
+        
+        // Ordenação numérica (ex: 2026-1 antes de 2026-10)
+        return codeA.localeCompare(codeB, undefined, { numeric: true, sensitivity: 'base' });
+      });
+    }
+
     // Ordenação dinâmica para a aba "Recusaram"
     if (activeTab === 'refused' && term === '') {
       return [...filtered].sort((a, b) => {
