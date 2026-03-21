@@ -35,6 +35,7 @@ import {
   setDoc, 
   updateDoc, 
   deleteDoc, 
+  onSnapshot,
   handleFirestoreError, 
   OperationType 
 } from './firebase';
@@ -86,6 +87,16 @@ const formatDate = (date: string | Date | undefined | null, pattern: string = 'd
 };
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
+
+const cleanData = (obj: any) => {
+  const newObj = { ...obj };
+  Object.keys(newObj).forEach(key => {
+    if (newObj[key] === undefined) {
+      delete newObj[key];
+    }
+  });
+  return newObj;
+};
 
 const Input = ({ 
   label, 
@@ -161,6 +172,7 @@ const Select = ({
 
 export default function App() {
   const [loading, setLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [view, setView] = useState<'dashboard' | 'new' | 'case' | 'reports'>('dashboard');
   const [activeTab, setActiveTab] = useState<VictimStatus>('active');
   const [victims, setVictims] = useState<Victim[]>([]);
@@ -184,28 +196,30 @@ export default function App() {
   const [reportMonth, setReportMonth] = useState(new Date().getMonth());
   const [reportYear, setReportYear] = useState(new Date().getFullYear());
 
-  // Function to fetch data from Firebase
-  const fetchData = async (showLoading = true) => {
-    try {
-      if (showLoading) setLoading(true);
-      const victimsSnapshot = await getDocs(collection(db, 'victims'));
-      const visitsSnapshot = await getDocs(collection(db, 'visits'));
-      
-      const victimsData = victimsSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Victim));
-      const visitsData = visitsSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Visit));
-      
-      setVictims(victimsData);
-      setVisits(visitsData);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, 'data');
-    } finally {
-      if (showLoading) setLoading(false);
-    }
-  };
-
-  // Initial load
+  // Initial load with onSnapshot for real-time updates
   useEffect(() => {
-    fetchData();
+    setLoading(true);
+    
+    const unsubscribeVictims = onSnapshot(collection(db, 'victims'), (snapshot) => {
+      const victimsData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Victim));
+      setVictims(victimsData);
+      setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'victims');
+      setLoading(false);
+    });
+
+    const unsubscribeVisits = onSnapshot(collection(db, 'visits'), (snapshot) => {
+      const visitsData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Visit));
+      setVisits(visitsData);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'visits');
+    });
+
+    return () => {
+      unsubscribeVictims();
+      unsubscribeVisits();
+    };
   }, []);
 
   // Derived Data
@@ -296,7 +310,10 @@ export default function App() {
 
   // Actions
   const handleSaveVictim = async (data: Partial<Victim>, file?: File) => {
+    if (isSaving) return;
+    
     try {
+      setIsSaving(true);
       let attachmentUrl = editingVictim?.attachmentUrl || '';
       let attachmentName = editingVictim?.attachmentName || '';
 
@@ -321,6 +338,7 @@ export default function App() {
         // 700KB * 1.33 = 931KB, which fits in 1MB
         if (fileToUpload.size > 700 * 1024) {
           showToast('O arquivo é muito grande. O limite é de aproximadamente 700KB.', 'error');
+          setIsSaving(false);
           return;
         }
 
@@ -344,18 +362,18 @@ export default function App() {
 
       if (editingVictim) {
         const victimRef = doc(db, 'victims', editingVictim.id);
-        await updateDoc(victimRef, { 
+        await updateDoc(victimRef, cleanData({ 
           ...finalData, 
           attachmentUrl, 
           attachmentName,
           updatedAt: now 
-        });
+        }));
       } else {
         const id = generateId();
         const newVictim: Victim = {
           id,
           internalCode: finalData.internalCode,
-          refusalDate: finalData.refusalDate || undefined,
+          refusalDate: finalData.refusalDate,
           processNumber: data.processNumber || '',
           name: data.name || '',
           phone: data.phone || '',
@@ -371,20 +389,26 @@ export default function App() {
         await setDoc(doc(db, 'victims', id), newVictim);
       }
 
-      await fetchData();
       setEditingVictim(null);
       setView('dashboard');
       showToast(editingVictim ? 'Cadastro atualizado com sucesso!' : 'Novo cadastro salvo com sucesso!');
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'victims');
       showToast('Erro ao salvar cadastro. Verifique o tamanho do anexo.', 'error');
+      handleFirestoreError(error, OperationType.WRITE, 'victims');
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleUpdateStatus = async (id: string, status: VictimStatus) => {
     try {
       const victim = victims.find(v => v.id === id);
-      if (status === 'active' && (!victim?.internalCode)) {
+      if (!victim) {
+        showToast('Vítima não encontrada.', 'error');
+        return;
+      }
+      
+      if (status === 'active' && (!victim.internalCode)) {
         setEditingVictim(victim || null);
         setNewVictimStatus('active');
         setView('new');
@@ -393,13 +417,12 @@ export default function App() {
       
       const victimRef = doc(db, 'victims', id);
       const now = new Date().toISOString();
-      await updateDoc(victimRef, { 
+      await updateDoc(victimRef, cleanData({ 
         status, 
         internalCode: status === 'refused' ? '' : (victim?.internalCode || ''),
         refusalDate: status === 'refused' ? (victim?.refusalDate || now.split('T')[0]) : null,
         updatedAt: now 
-      });
-      await fetchData();
+      }));
       showToast('Status atualizado com sucesso!');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `victims/${id}`);
@@ -416,10 +439,10 @@ export default function App() {
 
       if (editingVisit) {
         const visitRef = doc(db, 'visits', editingVisit.id);
-        await updateDoc(visitRef, { 
+        await updateDoc(visitRef, cleanData({ 
           ...data, 
           updatedAt: now 
-        });
+        }));
       } else {
         const id = generateId();
         const newVisit: Visit = {
@@ -434,7 +457,6 @@ export default function App() {
         await setDoc(doc(db, 'visits', id), newVisit);
       }
 
-      await fetchData();
       setShowVisitModal(false);
       setEditingVisit(null);
       showToast(editingVisit ? 'Visita atualizada com sucesso!' : 'Nova visita salva com sucesso!');
@@ -448,7 +470,6 @@ export default function App() {
     try {
       if (!window.confirm("Tem certeza que deseja excluir esta visita?")) return;
       await deleteDoc(doc(db, 'visits', visitId));
-      await fetchData();
       showToast('Visita excluída com sucesso!');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `visits/${visitId}`);
@@ -465,7 +486,6 @@ export default function App() {
         for (const visit of victimVisits) {
           await deleteDoc(doc(db, 'visits', visit.id));
         }
-        await fetchData();
         setVictimToDelete(null);
         if (selectedVictimId === id) setView('dashboard');
         showToast('Registro excluído com sucesso!');
@@ -907,8 +927,14 @@ export default function App() {
                     />
                   </div>
 
-                  <Button type="submit" className="w-full py-4 text-lg">
-                    <Save className="w-6 h-6" /> Salvar Cadastro
+                  <Button type="submit" className="w-full py-4 text-lg" disabled={isSaving}>
+                    {isSaving ? (
+                      <div className="animate-spin rounded-full h-6 w-6 border-2 border-white border-t-transparent"></div>
+                    ) : (
+                      <>
+                        <Save className="w-6 h-6" /> Salvar Cadastro
+                      </>
+                    )}
                   </Button>
                 </form>
               </div>
