@@ -12,7 +12,7 @@ export interface Victim {
   status: VictimStatus;
   attachmentUrl?: string;
   attachmentName?: string;
-  refusalDate?: string;
+  refusalDate?: string | null;
   createdAt: any;
   updatedAt: any;
 }
