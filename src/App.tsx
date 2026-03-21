@@ -586,8 +586,8 @@ export default function App() {
               <ShieldAlert className="text-white w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-xl font-black tracking-tight text-purple-900">PATRULHA <span className="text-purple-500">MP</span></h1>
-              <p className="text-[10px] font-bold text-purple-400 uppercase tracking-tighter">Querência – MT</p>
+              <h1 className="text-xl font-black tracking-tight text-purple-900">REDE <span className="text-purple-500">SEGURA</span></h1>
+              <p className="text-[10px] font-bold text-purple-400 uppercase tracking-tighter">Patrulha Maria da Penha - Querência/MT</p>
             </div>
           </div>
           
