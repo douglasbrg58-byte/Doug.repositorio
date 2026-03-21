@@ -1,0 +1,158 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (Auth UID)
+    // Fields:
+    //   - uid: string (required) - Firebase Auth UID
+    //   - email: string (required) - User email
+    //   - name: string (required) - User display name
+    //   - role: string (required) - 'admin' or 'officer'
+    //
+    // Collection: victims
+    // Document ID: victimId
+    // Fields:
+    //   - id: string (required) - Unique ID
+    //   - internalCode: string (optional) - Internal code
+    //   - processNumber: string (required) - Process number
+    //   - name: string (required) - Victim name
+    //   - phone: string (optional) - Victim phone
+    //   - aggressorName: string (optional) - Aggressor name
+    //   - protectiveMeasureDate: string (optional) - Date string
+    //   - observations: string (optional) - Observations
+    //   - status: string (required) - 'active', 'inactive', 'refused'
+    //   - attachmentUrl: string (optional) - Attachment URL
+    //   - attachmentName: string (optional) - Attachment name
+    //   - createdAt: string (required) - ISO 8601 timestamp
+    //   - updatedAt: string (required) - ISO 8601 timestamp
+    //
+    // Collection: visits
+    // Document ID: visitId
+    // Fields:
+    //   - id: string (required) - Unique ID
+    //   - victimId: string (required) - Victim ID
+    //   - date: string (required) - Visit date
+    //   - type: string (required) - 'victim', 'aggressor'
+    //   - situation: string (required) - 'first_visit', 'follow_up', 'emergency', 'violation'
+    //   - observation: string (required) - Visit observation
+    //   - createdAt: string (required) - ISO 8601 timestamp
+    //   - updatedAt: string (optional) - ISO 8601 timestamp
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        ( request.auth.token.email == "douglasbrg58@gmail.com" ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') );
+    }
+
+    function isOfficer() {
+      return isAuthenticated() &&
+        ( request.auth.token.email == "douglasbrg58@gmail.com" ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'officer') ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') );
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}.*");
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is string && ts.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'name', 'role']) &&
+             data.uid == request.auth.uid &&
+             data.email == request.auth.token.email &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.role in ['admin', 'officer'];
+    }
+
+    function isValidVictim(data) {
+      return hasRequiredFields(['id', 'processNumber', 'name', 'status', 'createdAt', 'updatedAt']) &&
+             hasOnlyAllowedFields(['id', 'internalCode', 'processNumber', 'name', 'phone', 'aggressorName', 'protectiveMeasureDate', 'observations', 'status', 'attachmentUrl', 'attachmentName', 'createdAt', 'updatedAt']) &&
+             data.id is string && data.id.size() > 0 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.processNumber is string && data.processNumber.size() > 0 && data.processNumber.size() < 100 &&
+             data.status in ['active', 'inactive', 'refused'] &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidVisit(data) {
+      return hasRequiredFields(['id', 'victimId', 'date', 'type', 'situation', 'observation', 'createdAt']) &&
+             hasOnlyAllowedFields(['id', 'victimId', 'date', 'type', 'situation', 'observation', 'createdAt', 'updatedAt']) &&
+             data.id is string && data.id.size() > 0 &&
+             data.victimId is string && data.victimId.size() > 0 &&
+             isValidDateString(data.date) &&
+             data.type in ['victim', 'aggressor'] &&
+             data.situation in ['first_visit', 'follow_up', 'emergency', 'violation'] &&
+             data.observation is string && data.observation.size() < 10000 &&
+             isValidTimestamp(data.createdAt) &&
+             (!('updatedAt' in data) || isValidTimestamp(data.updatedAt));
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == 'officer' || isAdmin());
+      allow update: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == resource.data.role || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /victims/{victimId} {
+      allow read: if isOfficer();
+      allow create: if isOfficer() && isValidVictim(request.resource.data);
+      allow update: if isOfficer();
+      allow delete: if isAdmin();
+    }
+
+    match /visits/{visitId} {
+      allow read: if isOfficer();
+      allow create: if isOfficer() && isValidVisit(request.resource.data);
+      allow update: if isOfficer() && isValidVisit(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}

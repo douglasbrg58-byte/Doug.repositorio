@@ -1,0 +1,66 @@
+{
+  "entities": {
+    "Victim": {
+      "title": "Victim",
+      "description": "Information about a victim of domestic violence.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier for the victim." },
+        "internalCode": { "type": "string", "description": "Internal tracking code." },
+        "processNumber": { "type": "string", "description": "Legal process number." },
+        "name": { "type": "string", "description": "Full name of the victim." },
+        "phone": { "type": "string", "description": "Contact phone number." },
+        "aggressorName": { "type": "string", "description": "Name of the aggressor." },
+        "protectiveMeasureDate": { "type": "string", "format": "date", "description": "Date the protective measure was issued." },
+        "observations": { "type": "string", "description": "General observations." },
+        "status": { "type": "string", "enum": ["active", "inactive", "refused"], "description": "Current status." },
+        "attachmentUrl": { "type": "string", "description": "URL to the attached document." },
+        "attachmentName": { "type": "string", "description": "Original name of the attached file." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when the record was created." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Timestamp when the record was last updated." }
+      },
+      "required": ["id", "processNumber", "name", "status", "createdAt", "updatedAt"]
+    },
+    "Visit": {
+      "title": "Visit",
+      "description": "Record of a visit made by the patrol.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier for the visit." },
+        "victimId": { "type": "string", "description": "ID of the victim." },
+        "date": { "type": "string", "format": "date", "description": "Date of the visit." },
+        "type": { "type": "string", "enum": ["victim", "aggressor"], "description": "Type of visit." },
+        "situation": { "type": "string", "enum": ["first_visit", "follow_up", "emergency", "violation"], "description": "Situation of the visit." },
+        "observation": { "type": "string", "description": "Observations." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when the record was created." }
+      },
+      "required": ["id", "victimId", "date", "type", "situation", "observation", "createdAt"]
+    },
+    "User": {
+      "title": "User",
+      "description": "System user.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID." },
+        "email": { "type": "string", "format": "email", "description": "User email address." },
+        "name": { "type": "string", "description": "User display name." },
+        "role": { "type": "string", "enum": ["admin", "officer"], "description": "User role." }
+      },
+      "required": ["uid", "email", "role"]
+    }
+  },
+  "firestore": {
+    "/victims/{victimId}": {
+      "schema": "Victim",
+      "description": "Collection of victims."
+    },
+    "/visits/{visitId}": {
+      "schema": "Visit",
+      "description": "Collection of visits."
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of system users."
+    }
+  }
+}

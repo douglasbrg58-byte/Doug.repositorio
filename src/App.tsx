@@ -26,21 +26,17 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-
-// --- Helper Functions ---
-const formatDate = (date: string | Date | undefined | null, pattern: string = 'dd/MM/yyyy') => {
-  if (!date) return '---';
-  try {
-    if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return format(new Date(date + 'T12:00:00'), pattern);
-    }
-    return format(new Date(date), pattern);
-  } catch (e) {
-    return '---';
-  }
-};
-
-const generateId = () => Math.random().toString(36).substr(2, 9);
+import { 
+  db, 
+  collection, 
+  getDocs, 
+  doc, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  handleFirestoreError, 
+  OperationType 
+} from './firebase';
 
 // --- Components ---
 
@@ -74,6 +70,21 @@ const Button = ({
     </button>
   );
 };
+
+// --- Helper Functions ---
+const formatDate = (date: string | Date | undefined | null, pattern: string = 'dd/MM/yyyy') => {
+  if (!date) return '---';
+  try {
+    if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return format(new Date(date + 'T12:00:00'), pattern);
+    }
+    return format(new Date(date), pattern);
+  } catch (e) {
+    return '---';
+  }
+};
+
+const generateId = () => Math.random().toString(36).substr(2, 9);
 
 const Input = ({ 
   label, 
@@ -166,34 +177,60 @@ export default function App() {
   const [reportMonth, setReportMonth] = useState(new Date().getMonth());
   const [reportYear, setReportYear] = useState(new Date().getFullYear());
 
-  // Load data from LocalStorage
-  useEffect(() => {
-    const savedVictims = localStorage.getItem('victims');
-    const savedVisits = localStorage.getItem('visits');
-    
-    if (savedVictims) setVictims(JSON.parse(savedVictims));
-    if (savedVisits) setVisits(JSON.parse(savedVisits));
-    
-    setLoading(false);
-  }, []);
-
-  // Save data to LocalStorage
-  useEffect(() => {
-    if (!loading) {
-      localStorage.setItem('victims', JSON.stringify(victims));
-      localStorage.setItem('visits', JSON.stringify(visits));
+  // Function to fetch data from Firebase
+  const fetchData = async (showLoading = true) => {
+    try {
+      if (showLoading) setLoading(true);
+      const victimsSnapshot = await getDocs(collection(db, 'victims'));
+      const visitsSnapshot = await getDocs(collection(db, 'visits'));
+      
+      const victimsData = victimsSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Victim));
+      const visitsData = visitsSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Visit));
+      
+      setVictims(victimsData);
+      setVisits(visitsData);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, 'data');
+    } finally {
+      if (showLoading) setLoading(false);
     }
-  }, [victims, visits, loading]);
+  };
+
+  // Initial load
+  useEffect(() => {
+    fetchData();
+  }, []);
 
   // Derived Data
   const filteredVictims = useMemo(() => {
-    return victims.filter(v => {
-      const matchesStatus = v.status === activeTab;
-      const matchesSearch = v.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                           v.internalCode?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           v.processNumber.toLowerCase().includes(searchTerm.toLowerCase());
-      return matchesStatus && matchesSearch;
+    const term = searchTerm.toLowerCase().trim();
+    const filtered = victims.filter(v => {
+      const matchesSearch = v.name.toLowerCase().includes(term) || 
+                           v.internalCode?.toLowerCase().includes(term) ||
+                           v.processNumber.toLowerCase().includes(term);
+      
+      // Se houver termo de busca, mostra resultados de todas as abas
+      if (term !== '') return matchesSearch;
+      
+      // Caso contrário, filtra pela aba ativa
+      return v.status === activeTab;
     });
+
+    // Ordenação dinâmica para a aba "Recusaram"
+    if (activeTab === 'refused' && term === '') {
+      return [...filtered].sort((a, b) => {
+        const dateA = a.refusalDate ? new Date(a.refusalDate + 'T12:00:00').getTime() : 0;
+        const dateB = b.refusalDate ? new Date(b.refusalDate + 'T12:00:00').getTime() : 0;
+        
+        // Registros sem data ficam por último
+        if (dateA === 0 && dateB !== 0) return 1;
+        if (dateA !== 0 && dateB === 0) return -1;
+        
+        return dateB - dateA; // Decrescente
+      });
+    }
+
+    return filtered;
   }, [victims, activeTab, searchTerm]);
 
   const selectedVictim = useMemo(() => 
@@ -252,106 +289,151 @@ export default function App() {
 
   // Actions
   const handleSaveVictim = async (data: Partial<Victim>, file?: File) => {
-    let attachmentUrl = editingVictim?.attachmentUrl || '';
-    let attachmentName = editingVictim?.attachmentName || '';
+    try {
+      let attachmentUrl = editingVictim?.attachmentUrl || '';
+      let attachmentName = editingVictim?.attachmentName || '';
 
-    if (file) {
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve, reject) => {
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-      });
-      reader.readAsDataURL(file);
-      attachmentUrl = await base64Promise;
-      attachmentName = file.name;
+      if (file) {
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+        });
+        reader.readAsDataURL(file);
+        attachmentUrl = await base64Promise;
+        attachmentName = file.name;
+      }
+
+      const now = new Date().toISOString();
+      
+      const finalData = {
+        ...data,
+        internalCode: data.status === 'refused' ? '' : (data.internalCode || ''),
+        refusalDate: data.status === 'refused' ? (data.refusalDate || now.split('T')[0]) : null,
+      };
+
+      if (editingVictim) {
+        const victimRef = doc(db, 'victims', editingVictim.id);
+        await updateDoc(victimRef, { 
+          ...finalData, 
+          attachmentUrl, 
+          attachmentName,
+          updatedAt: now 
+        });
+      } else {
+        const id = generateId();
+        const newVictim: Victim = {
+          id,
+          internalCode: finalData.internalCode,
+          refusalDate: finalData.refusalDate || undefined,
+          processNumber: data.processNumber || '',
+          name: data.name || '',
+          phone: data.phone || '',
+          aggressorName: data.aggressorName || '',
+          protectiveMeasureDate: data.protectiveMeasureDate || '',
+          observations: data.observations || '',
+          status: data.status || 'active',
+          attachmentUrl,
+          attachmentName,
+          createdAt: now,
+          updatedAt: now,
+        };
+        await setDoc(doc(db, 'victims', id), newVictim);
+      }
+
+      await fetchData();
+      setEditingVictim(null);
+      setView('dashboard');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'victims');
     }
+  };
 
-    const now = new Date().toISOString();
-    
-    const finalData = {
-      ...data,
-      internalCode: data.status === 'refused' ? '' : (data.internalCode || ''),
-    };
-
-    if (editingVictim) {
-      setVictims(prev => prev.map(v => v.id === editingVictim.id ? { 
-        ...v, 
-        ...finalData, 
-        attachmentUrl, 
-        attachmentName,
+  const handleUpdateStatus = async (id: string, status: VictimStatus) => {
+    try {
+      const victim = victims.find(v => v.id === id);
+      if (status === 'active' && (!victim?.internalCode)) {
+        setEditingVictim(victim || null);
+        setNewVictimStatus('active');
+        setView('new');
+        return;
+      }
+      
+      const victimRef = doc(db, 'victims', id);
+      const now = new Date().toISOString();
+      await updateDoc(victimRef, { 
+        status, 
+        internalCode: status === 'refused' ? '' : (victim?.internalCode || ''),
+        refusalDate: status === 'refused' ? (victim?.refusalDate || now.split('T')[0]) : null,
         updatedAt: now 
-      } : v));
-    } else {
-      const newVictim: Victim = {
-        id: generateId(),
-        internalCode: finalData.internalCode,
-        processNumber: data.processNumber || '',
-        name: data.name || '',
-        phone: data.phone || '',
-        aggressorName: data.aggressorName || '',
-        protectiveMeasureDate: data.protectiveMeasureDate || '',
-        observations: data.observations || '',
-        status: data.status || 'active',
-        attachmentUrl,
-        attachmentName,
-        createdAt: now,
-        updatedAt: now,
-      };
-      setVictims(prev => [...prev, newVictim]);
+      });
+      await fetchData();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `victims/${id}`);
     }
-
-    setEditingVictim(null);
-    setView('dashboard');
   };
 
-  const handleUpdateStatus = (id: string, status: VictimStatus) => {
-    const victim = victims.find(v => v.id === id);
-    if (status === 'active' && (!victim?.internalCode)) {
-      setEditingVictim(victim || null);
-      setNewVictimStatus('active');
-      setView('new');
-      return;
+  const handleAddVisit = async (data: Partial<Visit>) => {
+    try {
+      const victimId = selectedVictimId || editingVictim?.id;
+      if (!victimId) return;
+
+      const now = new Date().toISOString();
+
+      if (editingVisit) {
+        const visitRef = doc(db, 'visits', editingVisit.id);
+        await updateDoc(visitRef, { 
+          ...data, 
+          updatedAt: now 
+        });
+      } else {
+        const id = generateId();
+        const newVisit: Visit = {
+          id,
+          victimId,
+          date: data.date || '',
+          type: data.type || 'victim',
+          situation: data.situation || 'follow_up',
+          observation: data.observation || '',
+          createdAt: now,
+        };
+        await setDoc(doc(db, 'visits', id), newVisit);
+      }
+
+      await fetchData();
+      setShowVisitModal(false);
+      setEditingVisit(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'visits');
     }
-    setVictims(prev => prev.map(v => v.id === id ? { 
-      ...v, 
-      status, 
-      internalCode: status === 'refused' ? '' : v.internalCode,
-      updatedAt: new Date().toISOString() 
-    } : v));
   };
 
-  const handleAddVisit = (data: Partial<Visit>) => {
-    const victimId = selectedVictimId || editingVictim?.id;
-    if (!victimId) return;
-
-    if (editingVisit) {
-      setVisits(prev => prev.map(v => v.id === editingVisit.id ? { ...v, ...data } : v));
-    } else {
-      const newVisit: Visit = {
-        id: generateId(),
-        victimId,
-        date: data.date || '',
-        type: data.type || 'victim',
-        situation: data.situation || 'follow_up',
-        observation: data.observation || '',
-        createdAt: new Date().toISOString(),
-      };
-      setVisits(prev => [...prev, newVisit]);
+  const handleDeleteVisit = async (visitId: string) => {
+    try {
+      if (!window.confirm("Tem certeza que deseja excluir esta visita?")) return;
+      await deleteDoc(doc(db, 'visits', visitId));
+      await fetchData();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `visits/${visitId}`);
     }
-
-    setShowVisitModal(false);
-    setEditingVisit(null);
   };
 
-  const handleDeleteVisit = (visitId: string) => {
-    if (!window.confirm("Tem certeza que deseja excluir esta visita?")) return;
-    setVisits(prev => prev.filter(v => v.id !== visitId));
-  };
-
-  const handleDeleteVictim = (id: string) => {
-    setVictims(prev => prev.filter(v => v.id !== id));
-    setVisits(prev => prev.filter(v => v.victimId !== id));
-    setVictimToDelete(null);
+  const handleDeleteVictim = async (id: string) => {
+    try {
+      if (window.confirm('Tem certeza que deseja excluir este registro?')) {
+        await deleteDoc(doc(db, 'victims', id));
+        // Also delete associated visits
+        const victimVisits = visits.filter(v => v.victimId === id);
+        for (const visit of victimVisits) {
+          await deleteDoc(doc(db, 'visits', visit.id));
+        }
+        await fetchData();
+        setVictimToDelete(null);
+        if (selectedVictimId === id) setView('dashboard');
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `victims/${id}`);
+    }
   };
 
   const exportPDF = () => {
@@ -457,14 +539,22 @@ export default function App() {
             >
               {/* Search Bar */}
               <div className="relative mb-8">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-purple-400 w-5 h-5" />
+                <Search className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 transition-colors ${searchTerm.trim() !== '' ? 'text-purple-600' : 'text-purple-400'}`} />
                 <input 
                   type="text"
                   placeholder="Buscar por nome, código ou processo..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-12 pr-4 py-4 bg-purple-50 border-2 border-purple-100 rounded-2xl focus:border-purple-400 focus:outline-none transition-all text-lg"
+                  className={`w-full pl-12 pr-4 py-4 bg-purple-50 border-2 rounded-2xl focus:outline-none transition-all text-lg ${searchTerm.trim() !== '' ? 'border-purple-600 ring-4 ring-purple-100' : 'border-purple-100 focus:border-purple-400'}`}
                 />
+                {searchTerm.trim() !== '' && (
+                  <div className="absolute -bottom-6 left-4 flex items-center gap-1.5">
+                    <span className="w-2 h-2 bg-purple-600 rounded-full animate-pulse" />
+                    <p className="text-[10px] font-black uppercase tracking-wider text-purple-600">
+                      Mostrando resultados de todas as categorias
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Tabs */}
@@ -506,7 +596,7 @@ export default function App() {
                   <table className="w-full text-left">
                     <thead className="bg-purple-50 text-purple-900 uppercase text-xs font-bold">
                       <tr>
-                        <th className="px-6 py-4">Código</th>
+                        <th className="px-6 py-4">{activeTab === 'refused' ? 'Recusa' : 'Código'}</th>
                         <th className="px-6 py-4">Processo</th>
                         <th className="px-6 py-4">Nome</th>
                         <th className="px-6 py-4">Telefone</th>
@@ -532,7 +622,7 @@ export default function App() {
                           return (
                             <tr key={victim.id} className={`hover:bg-purple-50/50 transition-colors group ${isDelayed ? 'bg-red-50' : ''}`}>
                               <td className="px-6 py-4 font-mono text-sm font-bold text-purple-600">
-                                {victim.internalCode || 'RECUSADO'}
+                                {activeTab === 'refused' ? formatDate(victim.refusalDate) : (victim.internalCode || '---')}
                               </td>
                               <td className="px-6 py-4 text-sm">{victim.processNumber}</td>
                               <td className="px-6 py-4 font-semibold flex items-center gap-2">
@@ -546,8 +636,8 @@ export default function App() {
                               <td className="px-6 py-4 text-sm">{victim.phone}</td>
                               <td className="px-6 py-4">
                                 <div className="flex gap-1">
-                                  {vVisits.slice(0, 3).map((v, i) => (
-                                    <span key={i} className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
+                                  {vVisits.slice(0, 3).map((v) => (
+                                    <span key={v.id} className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
                                       {formatDate(v.date, 'dd/MM')}
                                     </span>
                                   ))}
@@ -689,6 +779,7 @@ export default function App() {
                   
                   handleSaveVictim({
                     internalCode: formData.get('internalCode') as string,
+                    refusalDate: formData.get('refusalDate') as string,
                     processNumber: formData.get('processNumber') as string,
                     name: formData.get('name') as string,
                     phone: formData.get('phone') as string,
@@ -699,13 +790,21 @@ export default function App() {
                   }, file);
                 }}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {newVictimStatus !== 'refused' && (
+                    {newVictimStatus !== 'refused' ? (
                       <Input 
                         label="Código Interno" 
                         name="internalCode" 
                         placeholder="2026-01" 
                         required={newVictimStatus === 'active'} 
                         defaultValue={editingVictim?.internalCode} 
+                      />
+                    ) : (
+                      <Input 
+                        label="Data de Recusa" 
+                        name="refusalDate" 
+                        type="date"
+                        required
+                        defaultValue={editingVictim?.refusalDate || new Date().toISOString().split('T')[0]} 
                       />
                     )}
                     <Input label="Nº Processo" name="processNumber" required placeholder="0001456-22.2026" defaultValue={editingVictim?.processNumber} />
