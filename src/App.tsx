@@ -36,6 +36,7 @@ import {
   updateDoc, 
   deleteDoc, 
   onSnapshot,
+  writeBatch,
   handleFirestoreError, 
   OperationType 
 } from './firebase';
@@ -206,6 +207,7 @@ export default function App() {
       setLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'victims');
+      showToast('Erro ao carregar vítimas. Verifique sua conexão.', 'error');
       setLoading(false);
     });
 
@@ -214,13 +216,19 @@ export default function App() {
       setVisits(visitsData);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'visits');
+      showToast('Erro ao carregar visitas.', 'error');
     });
 
     return () => {
       unsubscribeVictims();
       unsubscribeVisits();
     };
-  }, []);
+  }, [db]);
+
+  // Scroll to top on view change
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [view]);
 
   // Derived Data
   const filteredVictims = useMemo(() => {
@@ -337,7 +345,7 @@ export default function App() {
         // Final size check (Base64 adds ~33% overhead, Firestore limit is 1MB)
         // 700KB * 1.33 = 931KB, which fits in 1MB
         if (fileToUpload.size > 700 * 1024) {
-          showToast('O arquivo é muito grande. O limite é de aproximadamente 700KB.', 'error');
+          showToast('O arquivo é muito grande. O limite é de 700KB (incluindo PDFs e documentos).', 'error');
           setIsSaving(false);
           return;
         }
@@ -480,15 +488,22 @@ export default function App() {
   const handleDeleteVictim = async (id: string) => {
     try {
       if (window.confirm('Tem certeza que deseja excluir este registro?')) {
-        await deleteDoc(doc(db, 'victims', id));
-        // Also delete associated visits
+        const batch = writeBatch(db);
+        
+        // Delete the victim document
+        batch.delete(doc(db, 'victims', id));
+        
+        // Delete associated visits
         const victimVisits = visits.filter(v => v.victimId === id);
         for (const visit of victimVisits) {
-          await deleteDoc(doc(db, 'visits', visit.id));
+          batch.delete(doc(db, 'visits', visit.id));
         }
+        
+        await batch.commit();
+        
         setVictimToDelete(null);
         if (selectedVictimId === id) setView('dashboard');
-        showToast('Registro excluído com sucesso!');
+        showToast('Registro e visitas associadas excluídos com sucesso!');
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `victims/${id}`);

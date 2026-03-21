@@ -13,8 +13,8 @@ export interface Victim {
   attachmentUrl?: string;
   attachmentName?: string;
   refusalDate?: string | null;
-  createdAt: any;
-  updatedAt: any;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type VisitType = 'victim' | 'aggressor';
@@ -27,5 +27,5 @@ export interface Visit {
   type: VisitType;
   situation: VisitSituation;
   observation: string;
-  createdAt: any;
+  createdAt: string;
 }
