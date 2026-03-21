@@ -29,7 +29,6 @@ import autoTable from 'jspdf-autotable';
 import imageCompression from 'browser-image-compression';
 import { 
   db, 
-  auth,
   collection, 
   getDocs, 
   doc, 
@@ -38,10 +37,6 @@ import {
   deleteDoc, 
   onSnapshot,
   writeBatch,
-  signInWithPopup,
-  signOut,
-  onAuthStateChanged,
-  googleProvider,
   handleFirestoreError, 
   OperationType 
 } from './firebase';
@@ -177,8 +172,6 @@ const Select = ({
 // --- Main App ---
 
 export default function App() {
-  const [user, setUser] = useState<any>(null);
-  const [authReady, setAuthReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [view, setView] = useState<'dashboard' | 'new' | 'case' | 'reports'>('dashboard');
@@ -204,20 +197,8 @@ export default function App() {
   const [reportMonth, setReportMonth] = useState(new Date().getMonth());
   const [reportYear, setReportYear] = useState(new Date().getFullYear());
 
-  // Auth listener
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      setAuthReady(true);
-      if (!user) setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
   // Initial load with onSnapshot for real-time updates
   useEffect(() => {
-    if (!user) return;
-
     setLoading(true);
     
     const unsubscribeVictims = onSnapshot(collection(db, 'victims'), (snapshot) => {
@@ -242,7 +223,7 @@ export default function App() {
       unsubscribeVictims();
       unsubscribeVisits();
     };
-  }, [user, db]);
+  }, [db]);
 
   // Scroll to top on view change
   useEffect(() => {
@@ -579,62 +560,6 @@ export default function App() {
     );
   }
 
-  const handleLogin = async () => {
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (error) {
-      console.error('Login error:', error);
-      showToast('Erro ao fazer login com Google.', 'error');
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      setView('dashboard');
-    } catch (error) {
-      console.error('Logout error:', error);
-    }
-  };
-
-  if (!authReady) {
-    return (
-      <div className="min-h-screen bg-purple-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent"></div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-purple-50 flex items-center justify-center p-4">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full text-center"
-        >
-          <div className="bg-purple-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
-            <ShieldAlert className="text-purple-600 w-10 h-10" />
-          </div>
-          <h1 className="text-3xl font-black text-purple-900 mb-2">Patrulha Maria da Penha</h1>
-          <p className="text-purple-600 mb-8">
-            Sistema de Gestão de Medidas Protetivas. Por favor, faça login para acessar.
-          </p>
-          <button
-            onClick={handleLogin}
-            className="w-full bg-white border-2 border-purple-100 text-purple-900 py-4 rounded-xl font-bold flex items-center justify-center gap-3 hover:bg-purple-50 transition-all shadow-sm"
-          >
-            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6" />
-            Entrar com Google
-          </button>
-          <p className="mt-8 text-[10px] text-purple-300 uppercase tracking-widest font-bold">
-            Acesso Restrito a Servidores Autorizados
-          </p>
-        </motion.div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-purple-50 text-purple-900 font-sans selection:bg-purple-200">
       <AnimatePresence>
@@ -667,17 +592,10 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-4">
-            <div className="hidden sm:flex items-center gap-3 px-4 py-2 bg-purple-50 rounded-full border border-purple-100">
-              {user.photoURL && <img src={user.photoURL} alt={user.displayName} className="w-6 h-6 rounded-full" />}
-              <span className="text-xs font-bold text-purple-700">{user.displayName}</span>
+            <div className="flex items-center gap-2 text-purple-400 text-xs font-bold">
+              <Calendar className="w-4 h-4" />
+              {format(new Date(), "EEEE, d 'de' MMMM", { locale: ptBR })}
             </div>
-            <button 
-              onClick={handleLogout}
-              className="p-2 text-purple-400 hover:text-red-500 transition-colors"
-              title="Sair"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
           </div>
         </div>
       </header>

@@ -140,17 +140,11 @@ service cloud.firestore {
     }
 
     match /victims/{victimId} {
-      allow read: if isOfficer();
-      allow create: if isOfficer() && isValidVictim(request.resource.data);
-      allow update: if isOfficer();
-      allow delete: if isAdmin();
+      allow read, write: if true;
     }
 
     match /visits/{visitId} {
-      allow read: if isOfficer();
-      allow create: if isOfficer() && isValidVisit(request.resource.data);
-      allow update: if isOfficer() && isValidVisit(request.resource.data);
-      allow delete: if isAdmin();
+      allow read, write: if true;
     }
 
     match /test/connection {
