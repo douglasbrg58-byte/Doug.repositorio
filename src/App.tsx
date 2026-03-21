@@ -234,9 +234,9 @@ export default function App() {
   const filteredVictims = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
     const filtered = victims.filter(v => {
-      const matchesSearch = v.name.toLowerCase().includes(term) || 
-                           v.internalCode?.toLowerCase().includes(term) ||
-                           v.processNumber.toLowerCase().includes(term);
+      const matchesSearch = (v.name?.toLowerCase() || '').includes(term) || 
+                           (v.internalCode?.toLowerCase() || '').includes(term) ||
+                           (v.processNumber?.toLowerCase() || '').includes(term);
       
       // Se houver termo de busca, mostra resultados de todas as abas
       if (term !== '') return matchesSearch;
@@ -272,6 +272,7 @@ export default function App() {
 
   const filteredVisitsForReport = useMemo(() => {
     return visits.filter(v => {
+      if (!v.date) return false;
       const d = new Date(v.date + 'T12:00:00');
       if (reportType === 'monthly') {
         return d.getMonth() === reportMonth && d.getFullYear() === reportYear;
@@ -297,17 +298,20 @@ export default function App() {
     let lastDate: Date;
     
     if (victimVisits.length > 0) {
-      const dates = victimVisits.map(v => new Date(v.date + 'T12:00:00').getTime());
+      const dates = victimVisits.map(v => new Date((v.date || '') + 'T12:00:00').getTime());
       lastDate = new Date(Math.max(...dates));
     } else if (victim.protectiveMeasureDate) {
       lastDate = new Date(victim.protectiveMeasureDate + 'T12:00:00');
-    } else {
+    } else if (victim.createdAt) {
       lastDate = new Date(victim.createdAt);
+    } else {
+      return 0;
     }
     
     const today = new Date();
     today.setHours(12, 0, 0, 0);
     const diffTime = today.getTime() - lastDate.getTime();
+    if (isNaN(diffTime)) return 0;
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
     return diffDays;
   };
@@ -377,9 +381,6 @@ export default function App() {
           updatedAt: now 
         });
         await updateDoc(victimRef, updateData);
-        
-        // Manual state update for immediate UI feedback
-        setVictims(prev => prev.map(v => v.id === editingVictim.id ? { ...v, ...updateData } as Victim : v));
       } else {
         const id = generateId();
         const newVictim: Victim = {
@@ -399,9 +400,6 @@ export default function App() {
           updatedAt: now,
         };
         await setDoc(doc(db, 'victims', id), cleanData(newVictim));
-        
-        // Manual state update for immediate UI feedback
-        setVictims(prev => [...prev, newVictim]);
       }
 
       setEditingVictim(null);
@@ -440,9 +438,6 @@ export default function App() {
       });
       await updateDoc(victimRef, updateData);
       
-      // Manual state update for immediate UI feedback
-      setVictims(prev => prev.map(v => v.id === id ? { ...v, ...updateData } as Victim : v));
-      
       showToast('Status atualizado com sucesso!');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `victims/${id}`);
@@ -464,9 +459,6 @@ export default function App() {
           updatedAt: now 
         });
         await updateDoc(visitRef, updateData);
-        
-        // Manual state update
-        setVisits(prev => prev.map(v => v.id === editingVisit.id ? { ...v, ...updateData } as Visit : v));
       } else {
         const id = generateId();
         const newVisit: Visit = {
@@ -479,9 +471,6 @@ export default function App() {
           createdAt: now,
         };
         await setDoc(doc(db, 'visits', id), cleanData(newVisit));
-        
-        // Manual state update
-        setVisits(prev => [...prev, newVisit]);
       }
 
       setShowVisitModal(false);
@@ -497,9 +486,6 @@ export default function App() {
     try {
       if (!window.confirm("Tem certeza que deseja excluir esta visita?")) return;
       await deleteDoc(doc(db, 'visits', visitId));
-      
-      // Manual state update
-      setVisits(prev => prev.filter(v => v.id !== visitId));
       
       showToast('Visita excluída com sucesso!');
     } catch (error) {
@@ -523,10 +509,6 @@ export default function App() {
         }
         
         await batch.commit();
-        
-        // Manual state update
-        setVictims(prev => prev.filter(v => v.id !== id));
-        setVisits(prev => prev.filter(v => v.victimId !== id));
         
         setVictimToDelete(null);
         if (selectedVictimId === id) setView('dashboard');
