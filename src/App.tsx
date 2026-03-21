@@ -223,7 +223,7 @@ export default function App() {
       unsubscribeVictims();
       unsubscribeVisits();
     };
-  }, [db]);
+  }, []);
 
   // Scroll to top on view change
   useEffect(() => {
@@ -370,12 +370,16 @@ export default function App() {
 
       if (editingVictim) {
         const victimRef = doc(db, 'victims', editingVictim.id);
-        await updateDoc(victimRef, cleanData({ 
+        const updateData = cleanData({ 
           ...finalData, 
           attachmentUrl, 
           attachmentName,
           updatedAt: now 
-        }));
+        });
+        await updateDoc(victimRef, updateData);
+        
+        // Manual state update for immediate UI feedback
+        setVictims(prev => prev.map(v => v.id === editingVictim.id ? { ...v, ...updateData } as Victim : v));
       } else {
         const id = generateId();
         const newVictim: Victim = {
@@ -395,6 +399,9 @@ export default function App() {
           updatedAt: now,
         };
         await setDoc(doc(db, 'victims', id), cleanData(newVictim));
+        
+        // Manual state update for immediate UI feedback
+        setVictims(prev => [...prev, newVictim]);
       }
 
       setEditingVictim(null);
@@ -425,12 +432,17 @@ export default function App() {
       
       const victimRef = doc(db, 'victims', id);
       const now = new Date().toISOString();
-      await updateDoc(victimRef, cleanData({ 
+      const updateData = cleanData({ 
         status, 
         internalCode: status === 'refused' ? '' : (victim.internalCode || ''),
         refusalDate: status === 'refused' ? (victim.refusalDate || now.split('T')[0]) : null,
         updatedAt: now 
-      }));
+      });
+      await updateDoc(victimRef, updateData);
+      
+      // Manual state update for immediate UI feedback
+      setVictims(prev => prev.map(v => v.id === id ? { ...v, ...updateData } as Victim : v));
+      
       showToast('Status atualizado com sucesso!');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `victims/${id}`);
@@ -447,10 +459,14 @@ export default function App() {
 
       if (editingVisit) {
         const visitRef = doc(db, 'visits', editingVisit.id);
-        await updateDoc(visitRef, cleanData({ 
+        const updateData = cleanData({ 
           ...data, 
           updatedAt: now 
-        }));
+        });
+        await updateDoc(visitRef, updateData);
+        
+        // Manual state update
+        setVisits(prev => prev.map(v => v.id === editingVisit.id ? { ...v, ...updateData } as Visit : v));
       } else {
         const id = generateId();
         const newVisit: Visit = {
@@ -463,6 +479,9 @@ export default function App() {
           createdAt: now,
         };
         await setDoc(doc(db, 'visits', id), cleanData(newVisit));
+        
+        // Manual state update
+        setVisits(prev => [...prev, newVisit]);
       }
 
       setShowVisitModal(false);
@@ -478,6 +497,10 @@ export default function App() {
     try {
       if (!window.confirm("Tem certeza que deseja excluir esta visita?")) return;
       await deleteDoc(doc(db, 'visits', visitId));
+      
+      // Manual state update
+      setVisits(prev => prev.filter(v => v.id !== visitId));
+      
       showToast('Visita excluída com sucesso!');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `visits/${visitId}`);
@@ -500,6 +523,10 @@ export default function App() {
         }
         
         await batch.commit();
+        
+        // Manual state update
+        setVictims(prev => prev.filter(v => v.id !== id));
+        setVisits(prev => prev.filter(v => v.victimId !== id));
         
         setVictimToDelete(null);
         if (selectedVictimId === id) setView('dashboard');
