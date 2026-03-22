@@ -130,7 +130,7 @@ const LoginScreen = ({ onLogin }: { onLogin: (type: UserType, name: string) => v
             <ShieldCheck className="w-10 h-10 text-white" />
           </div>
           <h1 className="text-3xl font-black text-purple-900 mb-2">Sistema Rede Segura</h1>
-          <p className="text-purple-600 mb-8">Controle de Medidas Protetivas de Urgência - MPUs</p>
+          <p className="text-purple-600 mb-8">Controle de Medidas Protetivas de Urgência - MPU</p>
           
           <div className="space-y-4">
             <Button 
@@ -759,7 +759,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-xl font-black tracking-tight text-purple-900 uppercase">SISTEMA <span className="text-purple-500">REDE SEGURA</span></h1>
-              <p className="text-[10px] font-bold text-purple-400 uppercase tracking-tighter">Patrulha Maria da Penha - Querência/MT</p>
+              <p className="text-[10px] font-bold text-purple-400 uppercase tracking-tighter">Patrulha Maria da Penha - Querência/MT - PMP</p>
             </div>
           </div>
           
@@ -1485,10 +1485,10 @@ export default function App() {
 
       <footer className="mt-12 py-8 bg-purple-50 border-t border-purple-100 text-center">
         <p className="text-sm text-purple-400 font-medium">
-          © 2026 Central de Acompanhamento – Patrulha Maria da Penha
+          © 2026 Central de Acompanhamento – Patrulha Maria da Penha - Querência/MT
         </p>
         <p className="text-[10px] text-purple-300 mt-1 uppercase tracking-widest">
-          Sistema de Gestão de Medidas Protetivas
+          SISTEMA DE GESTÃO DE MEDIDAS PROTETIVAS DE URGÊNCIA - MPU
         </p>
       </footer>
     </div>
