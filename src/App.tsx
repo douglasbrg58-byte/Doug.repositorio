@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Victim, VictimStatus, Visit, VisitType, VisitSituation } from './types';
+import { Victim, VictimStatus, Visit, VisitType, VisitSituation, User, UserType } from './types';
 import { 
   Plus, 
   Search, 
@@ -19,7 +19,11 @@ import {
   ShieldAlert,
   AlertTriangle,
   Download,
-  Trash2
+  Trash2,
+  LogOut,
+  Lock,
+  ShieldCheck,
+  Key
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -99,6 +103,108 @@ const cleanData = (obj: any) => {
   return newObj;
 };
 
+const LoginScreen = ({ onLogin }: { onLogin: (type: UserType, name: string) => void }) => {
+  const [mode, setMode] = useState<'initial' | 'login'>('initial');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const handleAdminLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (username === 'Porto' && password === '267130') {
+      onLogin('admin', 'Porto');
+    } else {
+      setError('Usuário ou senha incorretos');
+    }
+  };
+
+  if (mode === 'initial') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 to-indigo-100 flex items-center justify-center p-4">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full text-center"
+        >
+          <div className="w-20 h-20 bg-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-purple-200">
+            <ShieldCheck className="w-10 h-10 text-white" />
+          </div>
+          <h1 className="text-3xl font-black text-purple-900 mb-2">Sistema Rede Segura</h1>
+          <p className="text-purple-600 mb-8">Controle de Medidas Protetivas de Urgência - MPUs</p>
+          
+          <div className="space-y-4">
+            <Button 
+              onClick={() => setMode('login')} 
+              className="w-full py-4 text-lg"
+            >
+              <Lock className="w-5 h-5" />
+              Login Administrativo
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              onClick={() => onLogin('visitor', 'Visitante')} 
+              className="w-full py-4 text-lg"
+            >
+              <UserIcon className="w-5 h-5" />
+              Entrar como Visitante
+            </Button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-indigo-100 flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full"
+      >
+        <button 
+          onClick={() => setMode('initial')}
+          className="text-purple-600 hover:text-purple-800 flex items-center gap-1 mb-6 font-medium"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Voltar
+        </button>
+        
+        <h2 className="text-2xl font-black text-purple-900 mb-6">Acesso Restrito</h2>
+        
+        <form onSubmit={handleAdminLogin} className="space-y-4">
+          <Input 
+            label="Usuário"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="Digite seu usuário"
+            required
+          />
+          <Input 
+            label="Senha"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Digite sua senha"
+            required
+          />
+          
+          {error && (
+            <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm font-medium border border-red-100">
+              {error}
+            </div>
+          )}
+          
+          <Button type="submit" className="w-full py-3 mt-4">
+            <Key className="w-5 h-5" />
+            Entrar
+          </Button>
+        </form>
+      </motion.div>
+    </div>
+  );
+};
+
 const Input = ({ 
   label, 
   value, 
@@ -172,6 +278,23 @@ const Select = ({
 // --- Main App ---
 
 export default function App() {
+  const [user, setUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem('porto_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  const handleLogin = (type: UserType, name: string) => {
+    const newUser = { name, type };
+    setUser(newUser);
+    localStorage.setItem('porto_user', JSON.stringify(newUser));
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    localStorage.removeItem('porto_user');
+    setView('dashboard');
+  };
+
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [view, setView] = useState<'dashboard' | 'new' | 'case' | 'reports'>('dashboard');
@@ -338,6 +461,10 @@ export default function App() {
 
   // Actions
   const handleSaveVictim = async (data: Partial<Victim>, file?: File) => {
+    if (user?.type !== 'admin') {
+      showToast('Ação restrita para administradores.', 'error');
+      return;
+    }
     if (isSaving) return;
     
     try {
@@ -430,6 +557,10 @@ export default function App() {
   };
 
   const handleUpdateStatus = async (id: string, status: VictimStatus) => {
+    if (user?.type !== 'admin') {
+      showToast('Ação restrita para administradores.', 'error');
+      return;
+    }
     try {
       const victim = victims.find(v => v.id === id);
       if (!victim) {
@@ -462,6 +593,10 @@ export default function App() {
   };
 
   const handleAddVisit = async (data: Partial<Visit>) => {
+    if (user?.type !== 'admin') {
+      showToast('Ação restrita para administradores.', 'error');
+      return;
+    }
     try {
       const victimId = selectedVictimId || editingVictim?.id;
       if (!victimId) return;
@@ -499,6 +634,10 @@ export default function App() {
   };
 
   const handleDeleteVisit = async (visitId: string) => {
+    if (user?.type !== 'admin') {
+      showToast('Ação restrita para administradores.', 'error');
+      return;
+    }
     try {
       if (!window.confirm("Tem certeza que deseja excluir esta visita?")) return;
       await deleteDoc(doc(db, 'visits', visitId));
@@ -511,6 +650,10 @@ export default function App() {
   };
 
   const handleDeleteVictim = async (id: string) => {
+    if (user?.type !== 'admin') {
+      showToast('Ação restrita para administradores.', 'error');
+      return;
+    }
     try {
       if (window.confirm('Tem certeza que deseja excluir este registro?')) {
         const batch = writeBatch(db);
@@ -585,6 +728,10 @@ export default function App() {
     );
   }
 
+  if (!user) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
   return (
     <div className="min-h-screen bg-purple-50 text-purple-900 font-sans selection:bg-purple-200">
       <AnimatePresence>
@@ -611,16 +758,28 @@ export default function App() {
               <ShieldAlert className="text-white w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-xl font-black tracking-tight text-purple-900 uppercase">CENTRAL DE <span className="text-purple-500">ACOMPANHAMENTO</span></h1>
+              <h1 className="text-xl font-black tracking-tight text-purple-900 uppercase">SISTEMA <span className="text-purple-500">REDE SEGURA</span></h1>
               <p className="text-[10px] font-bold text-purple-400 uppercase tracking-tighter">Patrulha Maria da Penha - Querência/MT</p>
             </div>
           </div>
           
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 text-purple-400 text-xs font-bold">
-              <Calendar className="w-4 h-4" />
-              {format(new Date(), "EEEE, d 'de' MMMM", { locale: ptBR })}
+            <div className="flex items-center gap-3 pr-4 border-r border-purple-100">
+              <div className="text-right hidden sm:block">
+                <p className="text-xs font-black text-purple-900 uppercase">{user.name}</p>
+                <p className={`text-[10px] font-bold uppercase ${user.type === 'admin' ? 'text-emerald-600' : 'text-emerald-500'}`}>
+                  {user.type === 'admin' ? 'Modo Admin' : 'Modo Visitante'}
+                </p>
+              </div>
+              <div className={`p-2 rounded-xl ${user.type === 'admin' ? 'bg-purple-100' : 'bg-amber-100'}`}>
+                <UserIcon className={`w-5 h-5 ${user.type === 'admin' ? 'text-purple-600' : 'text-amber-600'}`} />
+              </div>
             </div>
+            
+            <Button variant="ghost" onClick={handleLogout} className="text-red-500 hover:bg-red-50 p-2 h-auto">
+              <LogOut className="w-5 h-5" />
+              <span className="hidden md:inline">Sair</span>
+            </Button>
           </div>
         </div>
       </header>
@@ -628,13 +787,15 @@ export default function App() {
       <main className="max-w-7xl mx-auto p-4 md:p-6">
         {/* Navigation Actions */}
         <div className="flex flex-wrap gap-3 mb-8">
-          <Button 
-            onClick={() => { setEditingVictim(null); setNewVictimStatus('active'); setView('new'); }} 
-            variant={view === 'new' ? 'primary' : 'outline'}
-            className="flex-1 md:flex-none"
-          >
-            <Plus className="w-5 h-5" /> Novo Cadastro
-          </Button>
+          {user.type === 'admin' && (
+            <Button 
+              onClick={() => { setEditingVictim(null); setNewVictimStatus('active'); setView('new'); }} 
+              variant={view === 'new' ? 'primary' : 'outline'}
+              className="flex-1 md:flex-none"
+            >
+              <Plus className="w-5 h-5" /> Novo Cadastro
+            </Button>
+          )}
           <Button 
             onClick={() => setView('dashboard')} 
             variant={view === 'dashboard' ? 'primary' : 'outline'}
@@ -772,11 +933,12 @@ export default function App() {
                                 <select 
                                   value={victim.status}
                                   onChange={(e) => handleUpdateStatus(victim.id, e.target.value as VictimStatus)}
+                                  disabled={user.type !== 'admin'}
                                   className={`text-xs font-bold px-2 py-1 rounded-full border-none focus:ring-2 focus:ring-purple-400 ${
                                     victim.status === 'active' ? 'bg-green-100 text-green-700' :
                                     victim.status === 'inactive' ? 'bg-gray-100 text-gray-700' :
                                     'bg-red-100 text-red-700'
-                                  }`}
+                                  } ${user.type !== 'admin' ? 'cursor-not-allowed opacity-80' : ''}`}
                                 >
                                   <option value="active">Ativo</option>
                                   <option value="inactive">Inativo</option>
@@ -807,24 +969,28 @@ export default function App() {
                                   >
                                     <ChevronRight className="w-5 h-5" />
                                   </Button>
-                                  <Button 
-                                    variant="ghost" 
-                                    onClick={() => { 
-                                      setEditingVictim(victim); 
-                                      setNewVictimStatus(victim.status);
-                                      setView('new'); 
-                                    }}
-                                    className="p-2"
-                                  >
-                                    <Edit className="w-5 h-5" />
-                                  </Button>
-                                  <Button 
-                                    variant="ghost" 
-                                    onClick={() => setVictimToDelete(victim.id)}
-                                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50"
-                                  >
-                                    <Trash2 className="w-5 h-5" />
-                                  </Button>
+                                  {user.type === 'admin' && (
+                                    <>
+                                      <Button 
+                                        variant="ghost" 
+                                        onClick={() => { 
+                                          setEditingVictim(victim); 
+                                          setNewVictimStatus(victim.status);
+                                          setView('new'); 
+                                        }}
+                                        className="p-2"
+                                      >
+                                        <Edit className="w-5 h-5" />
+                                      </Button>
+                                      <Button 
+                                        variant="ghost" 
+                                        onClick={() => setVictimToDelete(victim.id)}
+                                        className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50"
+                                      >
+                                        <Trash2 className="w-5 h-5" />
+                                      </Button>
+                                    </>
+                                  )}
                                 </div>
                               </td>
                             </tr>
@@ -1072,9 +1238,11 @@ export default function App() {
                       <h3 className="text-xl font-bold flex items-center gap-2">
                         <History className="w-6 h-6 text-purple-600" /> Histórico de Visitas
                       </h3>
-                      <Button onClick={() => { setEditingVisit(null); setShowVisitModal(true); }}>
-                        <Plus className="w-5 h-5" /> Registrar Visita
-                      </Button>
+                      {user.type === 'admin' && (
+                        <Button onClick={() => { setEditingVisit(null); setShowVisitModal(true); }}>
+                          <Plus className="w-5 h-5" /> Registrar Visita
+                        </Button>
+                      )}
                     </div>
 
                     <div className="space-y-4">
@@ -1107,22 +1275,24 @@ export default function App() {
                               </div>
                               <p className="text-purple-900 text-sm leading-relaxed">{visit.observation}</p>
                               
-                              <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <Button 
-                                  variant="ghost" 
-                                  onClick={() => { setEditingVisit(visit); setShowVisitModal(true); }}
-                                  className="p-1.5 h-auto bg-white shadow-sm"
-                                >
-                                  <Edit className="w-4 h-4" />
-                                </Button>
-                                <Button 
-                                  variant="ghost" 
-                                  onClick={() => handleDeleteVisit(visit.id)}
-                                  className="p-1.5 h-auto bg-white shadow-sm text-red-400 hover:text-red-600"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
-                              </div>
+                              {user.type === 'admin' && (
+                                <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Button 
+                                    variant="ghost" 
+                                    onClick={() => { setEditingVisit(visit); setShowVisitModal(true); }}
+                                    className="p-1.5 h-auto bg-white shadow-sm"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </Button>
+                                  <Button 
+                                    variant="ghost" 
+                                    onClick={() => handleDeleteVisit(visit.id)}
+                                    className="p-1.5 h-auto bg-white shadow-sm text-red-400 hover:text-red-600"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              )}
                             </div>
                           ))
                       )}

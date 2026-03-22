@@ -29,3 +29,10 @@ export interface Visit {
   observation: string;
   createdAt: string;
 }
+
+export type UserType = 'admin' | 'visitor';
+
+export interface User {
+  name: string;
+  type: UserType;
+}
