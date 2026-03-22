@@ -130,7 +130,8 @@ const LoginScreen = ({ onLogin }: { onLogin: (type: UserType, name: string) => v
             <ShieldCheck className="w-10 h-10 text-white" />
           </div>
           <h1 className="text-3xl font-black text-purple-900 mb-2">Sistema Rede Segura</h1>
-          <p className="text-purple-600 mb-8">Controle de Medidas Protetivas de Urgência - MPU</p>
+          <p className="text-purple-600 font-bold">Controle de Medidas Protetivas de Urgência - MPU</p>
+          <p className="text-purple-400 text-sm mb-8 font-bold">Patrulha Maria da Penha - Querência/MT</p>
           
           <div className="space-y-4">
             <Button 
